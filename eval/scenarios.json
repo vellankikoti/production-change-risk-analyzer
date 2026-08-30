@@ -58,5 +58,15 @@
     "expected_risk_level": "LOW",
     "expected_decision": "APPROVE",
     "expected_rule_ids": []
+  },
+  {
+    "id": "EVAL-007",
+    "description": "New stack with encryption, logging, and data protection violations",
+    "before": null,
+    "after": "tests/fixtures/templates/encryption_violations.yaml",
+    "environment": "production",
+    "expected_risk_level": "CRITICAL",
+    "expected_decision": "BLOCK",
+    "expected_rule_ids": ["ENC-001", "ENC-002", "ENC-003", "LOG-001", "LOG-003", "S3-001", "RDS-001", "DEL-001"]
   }
 ]
