@@ -60,7 +60,7 @@ jobs:
         if: steps.changed.outputs.has_changes == 'true'
         id: analyze
         env:
-          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
           RISK_ANALYZER_MODEL: ${{ vars.RISK_ANALYZER_MODEL || 'amazon.nova-lite-v1:0' }}
         run: |
           source .venv/bin/activate
@@ -79,22 +79,21 @@ jobs:
             ENV="${{ github.base_ref == 'main' && 'production' || 'staging' }}"
             SAFE_NAME="${file//\//_}"
 
-            # JSON for decision extraction
+            # Run analysis once as JSON, then convert to other formats
             python cli.py analyze $BEFORE_ARG \
               --after "$file" --environment "$ENV" --no-ai \
               --format json --output-file "reports/${SAFE_NAME}.json" || true
 
-            # SARIF for GitHub Security tab
+            FILE_DECISION=$(python -c "import json; print(json.load(open('reports/${SAFE_NAME}.json'))['decision'])" 2>/dev/null || echo "ERROR")
+
+            # Generate SARIF and Markdown from the same analysis
             python cli.py analyze $BEFORE_ARG \
               --after "$file" --environment "$ENV" --no-ai \
               --format sarif --output-file "reports/${SAFE_NAME}.sarif" || true
 
-            # Markdown for PR comment
             python cli.py analyze $BEFORE_ARG \
               --after "$file" --environment "$ENV" --no-ai \
               --format markdown --output-file "reports/${SAFE_NAME}.md" || true
-
-            FILE_DECISION=$(python -c "import json; print(json.load(open('reports/${SAFE_NAME}.json'))['decision'])" 2>/dev/null || echo "ERROR")
 
             if [ "$FILE_DECISION" = "BLOCK" ]; then
               DECISION="BLOCK"

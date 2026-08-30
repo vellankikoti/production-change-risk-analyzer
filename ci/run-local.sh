@@ -11,7 +11,7 @@ echo ""
 # Phase 1: Install
 echo "[1/4] Installing dependencies..."
 source .venv/bin/activate 2>/dev/null || { uv venv .venv && source .venv/bin/activate; }
-uv pip install -r requirements.txt -q
+uv pip install -r requirements-dev.txt -q
 
 # Phase 2: Unit Tests
 echo "[2/4] Running unit tests..."
