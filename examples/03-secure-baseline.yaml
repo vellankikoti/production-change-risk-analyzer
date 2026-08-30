@@ -1,0 +1,40 @@
+# Secure baseline for Example 3 (before template)
+# This is the "current state" — properly configured with redundancy.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Production stack — secure baseline
+
+Resources:
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: 2
+      MaxSize: 6
+      DesiredCapacity: 3
+      VPCZoneIdentifier:
+        - subnet-aaa
+        - subnet-bbb
+      LaunchConfigurationName: !Ref LC
+
+  LC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: ami-0123456789abcdef0
+      InstanceType: t3.medium
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.r5.large
+      Engine: postgres
+      EngineVersion: "15.4"
+      MasterUsername: admin
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: true
+      BackupRetentionPeriod: 7
+      StorageEncrypted: true
+
+Parameters:
+  DBPassword:
+    Type: String
+    NoEcho: true

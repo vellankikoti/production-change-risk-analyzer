@@ -1,0 +1,48 @@
+# Example 3: Reduced Production Availability
+# This template reduces redundancy — single instance, no Multi-AZ, no backups.
+# Run with before/after to see the diff:
+#   python cli.py analyze \
+#     --before examples/03-secure-baseline.yaml \
+#     --after examples/03-reduced-availability.yaml \
+#     --environment production --no-ai
+# Expected: CRITICAL / BLOCK — AVAIL-001 (capacity reduced), AVAIL-003 (Multi-AZ off), AVAIL-005 (no backups)
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Production stack with reduced availability
+
+Resources:
+  # ISSUE: Single instance — no redundancy
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: 1                        # <-- Single point of failure
+      MaxSize: 6
+      DesiredCapacity: 1                # <-- Reduced from 3
+      VPCZoneIdentifier:
+        - subnet-aaa
+        - subnet-bbb
+      LaunchConfigurationName: !Ref LC
+
+  LC:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: ami-0123456789abcdef0
+      InstanceType: t3.medium
+
+  # ISSUE: Multi-AZ disabled + no backups
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.r5.large
+      Engine: postgres
+      EngineVersion: "15.4"
+      MasterUsername: admin
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: false                    # <-- No failover
+      BackupRetentionPeriod: 0          # <-- No backups
+      StorageEncrypted: true
+
+Parameters:
+  DBPassword:
+    Type: String
+    NoEcho: true

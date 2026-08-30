@@ -1,0 +1,26 @@
+# Example 4: Missing Encryption and Logging
+# Common gaps: S3 without encryption/logging, EBS without encryption.
+# Run: python cli.py analyze --after examples/04-encryption-logging-gaps.yaml --no-ai
+# Expected: CRITICAL / BLOCK — ENC-001 (S3), ENC-003 (EBS), LOG-001 (S3 logging), S3-001 (public access)
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Storage resources with encryption and logging gaps
+
+Resources:
+  # ISSUE: S3 bucket without encryption, logging, or public access block
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-important-data-bucket
+      # Missing: BucketEncryption        <-- No encryption at rest
+      # Missing: LoggingConfiguration    <-- No access logging
+      # Missing: PublicAccessBlockConfiguration  <-- No public access block
+
+  # ISSUE: EBS volume without encryption
+  DataVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: us-east-1a
+      Size: 100
+      VolumeType: gp3
+      Encrypted: false                  # <-- Unencrypted EBS volume

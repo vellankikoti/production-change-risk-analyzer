@@ -150,23 +150,36 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 2: Analyze your first template (30 seconds)
+### Step 2: Run the examples (30 seconds)
 
 ```bash
-# No AWS credentials needed — fully deterministic
-python cli.py analyze \
-  --after tests/fixtures/templates/dangerous_changes.yaml \
-  --no-ai
-
-# Compare before vs after
-python cli.py analyze \
-  --before tests/fixtures/templates/secure_baseline.yaml \
-  --after tests/fixtures/templates/dangerous_changes.yaml \
-  --environment production \
-  --no-ai
+# Run all 5 example scenarios with one command
+bash examples/run-all-examples.sh
 ```
 
-**Expected output:** CRITICAL / BLOCK with findings for IAM admin access, all-traffic security group, reduced ASG capacity, disabled Multi-AZ, and removed backups.
+**Expected:** 5/5 PASS — public database blocked, IAM admin blocked, reduced availability blocked, encryption gaps blocked, safe changes approved.
+
+Or run them individually:
+
+```bash
+# Public database exposure → BLOCK
+python cli.py analyze --after examples/01-public-database.yaml --no-ai
+
+# IAM full admin access → BLOCK
+python cli.py analyze --after examples/02-iam-admin-access.yaml --no-ai
+
+# Before/after availability reduction → BLOCK
+python cli.py analyze \
+  --before examples/03-secure-baseline.yaml \
+  --after examples/03-reduced-availability.yaml \
+  --environment production --no-ai
+
+# Missing encryption & logging → BLOCK
+python cli.py analyze --after examples/04-encryption-logging-gaps.yaml --no-ai
+
+# Well-configured infrastructure → APPROVE
+python cli.py analyze --after examples/05-safe-changes.yaml --no-ai
+```
 
 ### Step 3: Enable AI explanation (optional)
 
@@ -190,6 +203,28 @@ python cli.py eval
 # Run unit tests
 pytest tests/ -v
 # Expected: 150+ tests passing
+```
+
+---
+
+## Examples
+
+The `examples/` directory contains 5 real-world scenarios you can run immediately. Each file is commented to explain what's wrong and why rules fire.
+
+| Example | What It Shows | Rules Triggered | Decision |
+|:--------|:-------------|:----------------|:---------|
+| [`01-public-database.yaml`](examples/01-public-database.yaml) | PostgreSQL open to internet, unencrypted RDS, public access | SG-001, ENC-002, RDS-001, DEL-001 | **BLOCK** |
+| [`02-iam-admin-access.yaml`](examples/02-iam-admin-access.yaml) | IAM role with `Action: "*", Resource: "*"` | IAM-003 | **BLOCK** |
+| [`03-reduced-availability.yaml`](examples/03-reduced-availability.yaml) | ASG reduced to 1, Multi-AZ off, backups removed | AVAIL-001, AVAIL-002, AVAIL-003, AVAIL-005, DEL-001 | **BLOCK** |
+| [`04-encryption-logging-gaps.yaml`](examples/04-encryption-logging-gaps.yaml) | S3 without encryption/logging, EBS unencrypted | ENC-001, ENC-003, LOG-001, S3-001 | **BLOCK** |
+| [`05-safe-changes.yaml`](examples/05-safe-changes.yaml) | Well-configured stack — all rules pass | None | **APPROVE** |
+
+```bash
+# Run all examples at once
+bash examples/run-all-examples.sh
+
+# Analyze your own template
+python cli.py analyze --after your-template.yaml --no-ai
 ```
 
 ---
@@ -824,6 +859,14 @@ production-change-risk-analyzer/
 │   ├── test_web/                  # FastAPI endpoint tests
 │   ├── test_storage/              # DynamoDB, S3 tests (moto)
 │   └── test_notifications/        # SNS notification tests (moto)
+├── examples/
+│   ├── 01-public-database.yaml    # Public DB exposure (BLOCK)
+│   ├── 02-iam-admin-access.yaml   # IAM admin access (BLOCK)
+│   ├── 03-reduced-availability.yaml # Availability reduction (BLOCK)
+│   ├── 03-secure-baseline.yaml    # Secure baseline (before template)
+│   ├── 04-encryption-logging-gaps.yaml # Encryption/logging gaps (BLOCK)
+│   ├── 05-safe-changes.yaml       # Well-configured (APPROVE)
+│   └── run-all-examples.sh        # Run all examples with pass/fail
 ├── eval/scenarios.json            # 7 evaluation scenarios
 ├── ci/
 │   ├── buildspec.yaml             # AWS CodeBuild

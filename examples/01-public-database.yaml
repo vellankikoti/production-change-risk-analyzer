@@ -1,0 +1,37 @@
+# Example 1: Public Database Exposure
+# This template exposes a PostgreSQL database to the entire internet.
+# Run: python cli.py analyze --after examples/01-public-database.yaml --no-ai
+# Expected: CRITICAL / BLOCK — SG-001 (public DB port), ENC-002 (unencrypted RDS)
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Web application with a database — contains intentional security issues
+
+Resources:
+  # ISSUE: Security group allows PostgreSQL (5432) from 0.0.0.0/0
+  # Anyone on the internet can reach the database
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Database access
+      VpcId: vpc-12345678
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0          # <-- This is the problem
+
+  # ISSUE: RDS instance without encryption and publicly accessible
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.r5.large
+      Engine: postgres
+      EngineVersion: "15.4"
+      MasterUsername: admin
+      MasterUserPassword: supersecret
+      StorageEncrypted: false           # <-- No encryption at rest
+      PubliclyAccessible: true          # <-- Reachable from internet
+      MultiAZ: true
+      BackupRetentionPeriod: 7
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup

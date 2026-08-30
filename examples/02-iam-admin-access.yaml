@@ -1,0 +1,30 @@
+# Example 2: IAM Full Admin Access
+# This template creates a role with unrestricted permissions.
+# Run: python cli.py analyze --after examples/02-iam-admin-access.yaml --no-ai
+# Expected: CRITICAL / BLOCK — IAM-003 (Action:* + Resource:*)
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Application role — contains intentional IAM issues
+
+Resources:
+  # ISSUE: Full admin access — Action: "*" + Resource: "*"
+  # This role can do anything in the AWS account
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: app-admin-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AdminPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "*"             # <-- Wildcard action
+                Resource: "*"           # <-- Wildcard resource = full admin

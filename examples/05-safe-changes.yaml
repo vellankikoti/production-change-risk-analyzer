@@ -1,0 +1,75 @@
+# Example 5: Safe Changes (Should Pass)
+# Well-configured infrastructure — all rules should pass.
+# Run: python cli.py analyze --after examples/05-safe-changes.yaml --no-ai
+# Expected: LOW / APPROVE — no findings
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Well-configured production infrastructure
+
+Resources:
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Application security group
+      VpcId: vpc-12345678
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16          # Private CIDR only
+
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: app-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AppPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject        # Specific actions only
+                  - s3:PutObject
+                Resource: arn:aws:s3:::my-app-bucket/*
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-secure-bucket
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+      LoggingConfiguration:
+        DestinationBucketName: my-log-bucket
+        LogFilePrefix: data-bucket/
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.r5.large
+      Engine: postgres
+      MasterUsername: admin
+      MasterUserPassword: !Ref DBPassword
+      MultiAZ: true
+      BackupRetentionPeriod: 7
+      StorageEncrypted: true
+      DeletionProtection: true
+
+Parameters:
+  DBPassword:
+    Type: String
+    NoEcho: true
