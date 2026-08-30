@@ -117,18 +117,25 @@ runs:
         esac
         REPORT_FILE="${{ runner.temp }}/risk-report.${EXT}"
 
-        # Generate formatted report
+        # Run analysis once as JSON, extract metrics, then convert format if needed
+        JSON_REPORT="${{ runner.temp }}/risk-report.json"
         python cli.py analyze $ARGS \
-          --format "$INPUT_FORMAT" \
-          --output-file "$REPORT_FILE" || true
+          --format json \
+          --output-file "$JSON_REPORT" || true
 
-        # Get decision from JSON output
-        RESULT=$(python cli.py analyze $ARGS --format json 2>/dev/null || echo '{"decision":"ERROR","risk_level":"ERROR","risk_score":0,"evidence":{"findings":[]}}')
+        DECISION=$(python -c "import sys,json; d=json.load(open('$JSON_REPORT')); print(d['decision'])")
+        RISK_LEVEL=$(python -c "import sys,json; d=json.load(open('$JSON_REPORT')); print(d['risk_level'])")
+        RISK_SCORE=$(python -c "import sys,json; d=json.load(open('$JSON_REPORT')); print(d['risk_score'])")
+        FINDING_COUNT=$(python -c "import sys,json; d=json.load(open('$JSON_REPORT')); print(len(d.get('evidence',{}).get('findings',[])))")
 
-        DECISION=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['decision'])")
-        RISK_LEVEL=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['risk_level'])")
-        RISK_SCORE=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['risk_score'])")
-        FINDING_COUNT=$(echo "$RESULT" | python -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('evidence',{}).get('findings',[])))")
+        # Generate formatted report if format is not json
+        if [ "$INPUT_FORMAT" != "json" ]; then
+          python cli.py analyze $ARGS \
+            --format "$INPUT_FORMAT" \
+            --output-file "$REPORT_FILE" || true
+        else
+          cp "$JSON_REPORT" "$REPORT_FILE"
+        fi
 
         echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
         echo "risk-level=$RISK_LEVEL" >> "$GITHUB_OUTPUT"
