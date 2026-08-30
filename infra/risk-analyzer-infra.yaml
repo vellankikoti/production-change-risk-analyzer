@@ -5,7 +5,6 @@ Parameters:
   Environment:
     Type: String
     Default: dev
-    AllowedValues: [dev, staging, production]
 
 Resources:
   ReportsTable:
@@ -34,13 +33,6 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      Tags:
-        - Key: Project
-          Value: risk-analyzer
-        - Key: Environment
-          Value: !Ref Environment
 
   EvidenceBucket:
     Type: AWS::S3::Bucket
@@ -62,105 +54,16 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      Tags:
-        - Key: Project
-          Value: risk-analyzer
 
   NotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub "risk-analyzer-alerts-${Environment}"
-      Tags:
-        - Key: Project
-          Value: risk-analyzer
-
-  AnalyzerRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "risk-analyzer-role-${Environment}"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-                - codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:Scan
-                Resource:
-                  - !GetAtt ReportsTable.Arn
-                  - !Sub "${ReportsTable.Arn}/index/*"
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt EvidenceBucket.Arn
-                  - !Sub "${EvidenceBucket.Arn}/*"
-        - PolicyName: SNSAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sns:Publish
-                Resource: !Ref NotificationTopic
-        - PolicyName: BedrockAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                Resource: "*"
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: "arn:aws:logs:*:*:*"
 
 Outputs:
   TableName:
-    Description: DynamoDB table name for risk reports
     Value: !Ref ReportsTable
-    Export:
-      Name: !Sub "${AWS::StackName}-TableName"
-
   BucketName:
-    Description: S3 bucket name for evidence storage
     Value: !Ref EvidenceBucket
-    Export:
-      Name: !Sub "${AWS::StackName}-BucketName"
-
   TopicArn:
-    Description: SNS topic ARN for risk notifications
     Value: !Ref NotificationTopic
-    Export:
-      Name: !Sub "${AWS::StackName}-TopicArn"
-
-  RoleArn:
-    Description: IAM role ARN for the analyzer
-    Value: !GetAtt AnalyzerRole.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-RoleArn"
