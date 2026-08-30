@@ -31,6 +31,7 @@ class ReducedDesiredCapacityRule(Rule):
     name = "Reduced Desired Capacity"
     description = "Detects reductions in Auto Scaling Group desired capacity"
     severity = Severity.MEDIUM
+    compliance = ["Well-Architected: REL06-BP01", "AWS Config: autoscaling-group-elb-healthcheck-required"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in ASG_TYPES and change.change_type == ChangeType.MODIFY
@@ -58,6 +59,7 @@ class ReducedMinCapacityRule(Rule):
     name = "Reduced Min Capacity Below 2"
     description = "Detects Auto Scaling Group min capacity set below 2"
     severity = Severity.HIGH
+    compliance = ["Well-Architected: REL06-BP01", "Well-Architected: REL10-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in ASG_TYPES and change.change_type != ChangeType.DELETE
@@ -95,6 +97,7 @@ class DisabledMultiAZRule(Rule):
     name = "Disabled Multi-AZ on RDS"
     description = "Detects disabling Multi-AZ on RDS instances"
     severity = Severity.CRITICAL
+    compliance = ["AWS Config: rds-multi-az-support", "SecurityHub: RDS.5", "Well-Architected: REL10-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in RDS_TYPES and change.change_type == ChangeType.MODIFY
@@ -124,6 +127,7 @@ class CriticalResourceDeletionRule(Rule):
     name = "Critical Resource Deletion"
     description = "Detects deletion of critical infrastructure resources"
     severity = Severity.CRITICAL
+    compliance = ["Well-Architected: REL10-BP01", "Well-Architected: OPS08-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in CRITICAL_RESOURCE_TYPES and change.change_type == ChangeType.DELETE
@@ -144,6 +148,7 @@ class BackupDisabledRule(Rule):
     name = "Backup Disabled"
     description = "Detects removal or disabling of backups"
     severity = Severity.HIGH
+    compliance = ["AWS Config: db-instance-backup-enabled", "SecurityHub: RDS.11", "Well-Architected: REL09-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in RDS_TYPES and change.change_type == ChangeType.MODIFY

@@ -70,6 +70,7 @@ class RuleFinding:
     finding: str
     evidence: dict[str, Any] = field(default_factory=dict)
     remediation: str = ""
+    compliance: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +80,7 @@ class RuleFinding:
             "finding": self.finding,
             "evidence": self.evidence,
             "remediation": self.remediation,
+            "compliance": self.compliance,
         }
 
     @classmethod
@@ -90,6 +92,7 @@ class RuleFinding:
             finding=data["finding"],
             evidence=data.get("evidence", {}),
             remediation=data.get("remediation", ""),
+            compliance=data.get("compliance", []),
         )
 
 

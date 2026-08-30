@@ -9,37 +9,54 @@ from src.rules.base import Rule
 class PublicSubnetAssociationRule(Rule):
     rule_id = "NET-001"
     name = "Public Subnet Association for Private Resources"
-    description = "Detects resources in public subnets that should be private"
+    description = "Detects subnet route table associations that reference route tables with IGW routes"
     severity = Severity.HIGH
+    compliance = ["CIS 5.1", "Well-Architected: SEC05-BP01"]
 
-    PRIVATE_RESOURCE_TYPES = {
-        "AWS::RDS::DBInstance",
-        "AWS::RDS::DBCluster",
-        "AWS::ElastiCache::CacheCluster",
-        "AWS::ElastiCache::ReplicationGroup",
-        "AWS::Redshift::Cluster",
-        "AWS::DynamoDB::Table",
-    }
+    def __init__(self) -> None:
+        super().__init__()
+        self._template_changes: list[ResourceChange] = []
+
+    def set_template_context(self, changes: list[ResourceChange]) -> None:
+        self._template_changes = changes
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type == "AWS::EC2::SubnetRouteTableAssociation" and change.change_type != ChangeType.DELETE
 
+    def _route_table_has_igw(self, route_table_ref: Any) -> bool | None:
+        rt_id = str(route_table_ref)
+        for c in self._template_changes:
+            if c.resource_type == "AWS::EC2::Route" and c.change_type != ChangeType.DELETE:
+                props = c.after or {}
+                gw = props.get("GatewayId", "")
+                rt = str(props.get("RouteTableId", ""))
+                dest = props.get("DestinationCidrBlock", "")
+                if "igw" in str(gw).lower() and dest == "0.0.0.0/0":
+                    if rt_id in rt or rt in rt_id:
+                        return True
+        return None
+
     def evaluate(self, change: ResourceChange) -> list[RuleFinding]:
-        findings: list[RuleFinding] = []
         props = change.after or {}
         subnet_id = props.get("SubnetId", "")
         route_table_id = props.get("RouteTableId", "")
-        if subnet_id and "private" in str(subnet_id).lower():
-            pass
-        findings.append(RuleFinding(
-            rule_id=self.rule_id,
-            severity=self.severity,
-            resource=change.resource_id,
-            finding=f"Subnet route table association may expose private resources",
-            evidence={"subnet_id": subnet_id, "route_table_id": route_table_id},
-            remediation="Verify the subnet does not contain databases or internal services that should remain private.",
-        ))
-        return findings
+
+        if "private" in str(subnet_id).lower():
+            return []
+
+        has_igw = self._route_table_has_igw(route_table_id)
+
+        if has_igw is True:
+            return [RuleFinding(
+                rule_id=self.rule_id,
+                severity=self.severity,
+                resource=change.resource_id,
+                finding="Subnet associated with a route table that has an Internet Gateway route (0.0.0.0/0 -> IGW)",
+                evidence={"subnet_id": subnet_id, "route_table_id": route_table_id},
+                remediation="Verify the subnet does not contain databases or internal services that should remain private.",
+            )]
+
+        return []
 
 
 class NATGatewayRemovalRule(Rule):
@@ -47,6 +64,7 @@ class NATGatewayRemovalRule(Rule):
     name = "NAT Gateway Removal"
     description = "Detects deletion of NAT Gateways which breaks private subnet internet access"
     severity = Severity.HIGH
+    compliance = ["Well-Architected: SEC05-BP01", "Well-Architected: REL02-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type == "AWS::EC2::NatGateway" and change.change_type == ChangeType.DELETE
@@ -67,6 +85,7 @@ class PermissiveNACLRule(Rule):
     name = "Overly Permissive NACL"
     description = "Detects NACLs allowing all traffic from 0.0.0.0/0"
     severity = Severity.MEDIUM
+    compliance = ["CIS 5.1", "SecurityHub: EC2.21", "Well-Architected: SEC05-BP02"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in {"AWS::EC2::NetworkAclEntry", "AWS::EC2::NetworkAcl"} and change.change_type != ChangeType.DELETE
@@ -102,6 +121,7 @@ class InternetGatewayRouteRule(Rule):
     name = "Internet Gateway Route for Private Subnets"
     description = "Detects routes to Internet Gateways that may expose private subnets"
     severity = Severity.HIGH
+    compliance = ["CIS 5.1", "Well-Architected: SEC05-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type == "AWS::EC2::Route" and change.change_type != ChangeType.DELETE

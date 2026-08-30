@@ -135,7 +135,6 @@ def _score_ai_quality(report: RiskReport) -> AIQualityScore:
     has_remediation = bool(ai.remediation and len(ai.remediation) > 10)
     has_blast_radius = bool(ai.blast_radius and len(ai.blast_radius) > 10)
 
-    finding_texts = [f.finding.lower() for f in report.evidence.findings]
     facts_grounded = True
     if ai.facts:
         for fact in ai.facts:

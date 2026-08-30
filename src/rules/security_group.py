@@ -71,6 +71,7 @@ class PublicSensitivePortRule(Rule):
     name = "Public Access to Sensitive Ports"
     description = "Detects 0.0.0.0/0 or ::/0 access to sensitive ports"
     severity = Severity.CRITICAL
+    compliance = ["CIS 5.2", "CIS 5.3", "AWS Config: restricted-ssh", "AWS Config: restricted-common-ports", "SecurityHub: EC2.19", "Well-Architected: SEC05-BP02"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in SG_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -79,6 +80,9 @@ class PublicSensitivePortRule(Rule):
         findings: list[RuleFinding] = []
         props = change.after or {}
         for rule in _extract_ingress_rules(props, change.resource_type):
+            ip_protocol = str(rule.get("IpProtocol", ""))
+            if ip_protocol == "-1":
+                continue  # SG-004 covers all-traffic rules
             cidrs = _get_cidrs(rule)
             if not _is_public(cidrs):
                 continue
@@ -103,6 +107,7 @@ class UnrestrictedIngressRule(Rule):
     name = "Unrestricted Ingress"
     description = "Detects 0.0.0.0/0 ingress on any port"
     severity = Severity.MEDIUM
+    compliance = ["CIS 5.2", "AWS Config: vpc-sg-open-only-to-authorized-ports", "SecurityHub: EC2.18"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in SG_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -138,6 +143,7 @@ class WidePortRangeRule(Rule):
     name = "Wide Port Range"
     description = "Detects security group rules with port ranges wider than 100 ports"
     severity = Severity.MEDIUM
+    compliance = ["AWS Config: vpc-sg-open-only-to-authorized-ports", "Well-Architected: SEC05-BP02"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in SG_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -167,6 +173,7 @@ class AllTrafficRule(Rule):
     name = "All Traffic from Any Source"
     description = "Detects security group rules allowing all traffic (protocol -1) from 0.0.0.0/0"
     severity = Severity.CRITICAL
+    compliance = ["CIS 5.2", "CIS 5.3", "AWS Config: restricted-ssh", "AWS Config: restricted-common-ports", "SecurityHub: EC2.19", "Well-Architected: SEC05-BP02"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in SG_RESOURCE_TYPES and change.change_type != ChangeType.DELETE

@@ -1,0 +1,170 @@
+name: Infrastructure Change Risk Analysis
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'cloudformation/**'
+      - 'templates/**'
+      - 'cfn/**'
+      - '*.template'
+      - '**/*.template.yaml'
+      - '**/*.template.yml'
+      - '**/*.template.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  risk-analysis:
+    name: Analyze Infrastructure Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install -r requirements.txt
+
+      - name: Detect changed CloudFormation files
+        id: changed
+        run: |
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | \
+            grep -E '\.(yaml|yml|json|template)$' | \
+            grep -E '(infra|cloudformation|templates|cfn)/' || true)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          if [ -z "$CHANGED" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run risk analysis
+        if: steps.changed.outputs.has_changes == 'true'
+        id: analyze
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+          RISK_ANALYZER_MODEL: ${{ vars.RISK_ANALYZER_MODEL || 'amazon.nova-lite-v1:0' }}
+        run: |
+          source .venv/bin/activate
+          DECISION="APPROVE"
+          mkdir -p reports
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            echo "Analyzing: $file"
+
+            BEFORE_ARG=""
+            if git show "${BASE_SHA}:${file}" > /tmp/before.yaml 2>/dev/null; then
+              BEFORE_ARG="--before /tmp/before.yaml"
+            fi
+
+            python cli.py analyze \
+              $BEFORE_ARG \
+              --after "$file" \
+              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
+              --no-ai \
+              --format sarif \
+              --output-file "reports/${file//\//_}.sarif" || true
+
+            python cli.py analyze \
+              $BEFORE_ARG \
+              --after "$file" \
+              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
+              --no-ai \
+              --format markdown \
+              --output-file "reports/${file//\//_}.md" || true
+
+            FILE_DECISION=$(python cli.py analyze \
+              $BEFORE_ARG \
+              --after "$file" \
+              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
+              --no-ai \
+              --format json 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin)['decision'])" 2>/dev/null || echo "ERROR")
+
+            if [ "$FILE_DECISION" = "BLOCK" ]; then
+              DECISION="BLOCK"
+            elif [ "$FILE_DECISION" = "REVIEW" ] && [ "$DECISION" != "BLOCK" ]; then
+              DECISION="REVIEW"
+            fi
+          done <<< "${{ steps.changed.outputs.files }}"
+
+          echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SARIF results
+        if: steps.changed.outputs.has_changes == 'true' && always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/
+        continue-on-error: true
+
+      - name: Post PR comment
+        if: steps.changed.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const reportsDir = 'reports';
+            let body = '';
+
+            const files = fs.readdirSync(reportsDir).filter(f => f.endsWith('.md'));
+            for (const file of files) {
+              body += fs.readFileSync(path.join(reportsDir, file), 'utf8') + '\n\n';
+            }
+
+            if (!body.trim()) {
+              body = '✅ No infrastructure risk findings detected.';
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Infrastructure Change Risk Report')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+
+      - name: Gate decision
+        if: steps.changed.outputs.has_changes == 'true'
+        run: |
+          DECISION="${{ steps.analyze.outputs.decision }}"
+          echo "Overall decision: $DECISION"
+          if [ "$DECISION" = "BLOCK" ]; then
+            echo "::error::Infrastructure change BLOCKED due to critical risk findings"
+            exit 1
+          fi

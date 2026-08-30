@@ -54,6 +54,8 @@ def cli() -> None:
 @click.option("--save-evidence", is_flag=True, default=False, help="Save evidence to S3")
 @click.option("--notify", is_flag=True, default=False, help="Send SNS notification for HIGH/CRITICAL")
 @click.option("--json-output", is_flag=True, default=False, help="Output raw JSON instead of formatted report")
+@click.option("--format", "output_format", type=click.Choice(["rich", "json", "sarif", "markdown", "junit"]), default="rich", help="Output format")
+@click.option("--output-file", type=click.Path(), default=None, help="Write output to file instead of stdout")
 def analyze(
     before: str | None,
     after: str,
@@ -63,10 +65,15 @@ def analyze(
     save_evidence: bool,
     notify: bool,
     json_output: bool,
+    output_format: str,
+    output_file: str | None,
 ) -> None:
     """Analyze an infrastructure change for risks."""
     after_template = _read_file(after)
     before_template = _read_file(before) if before else None
+
+    if json_output:
+        output_format = "json"
 
     analyzer = ChangeAnalyzer(use_ai=not no_ai)
 
@@ -77,10 +84,7 @@ def analyze(
             environment=environment,
         )
 
-    if json_output:
-        click.echo(json.dumps(report.to_dict(), indent=2, default=str))
-    else:
-        _print_report(report)
+    _emit_output(report, output_format, output_file)
 
     if save:
         try:
@@ -109,6 +113,39 @@ def analyze(
             console.print(f"[red]Failed to send notification: {e}[/red]")
 
     sys.exit(0 if report.decision == Decision.APPROVE else 1)
+
+
+def _emit_output(report, output_format: str, output_file: str | None) -> None:
+    if output_format == "json":
+        text = json.dumps(report.to_dict(), indent=2, default=str)
+        if output_file:
+            with open(output_file, "w") as f:
+                f.write(text)
+        else:
+            click.echo(text)
+    elif output_format == "sarif":
+        from src.output.sarif import generate_sarif, write_sarif
+        if output_file:
+            write_sarif(report, output_file)
+            console.print(f"[green]SARIF report written to {output_file}[/green]")
+        else:
+            click.echo(json.dumps(generate_sarif(report), indent=2, default=str))
+    elif output_format == "markdown":
+        from src.output.markdown import generate_markdown, write_markdown
+        if output_file:
+            write_markdown(report, output_file)
+            console.print(f"[green]Markdown report written to {output_file}[/green]")
+        else:
+            click.echo(generate_markdown(report))
+    elif output_format == "junit":
+        from src.output.junit import generate_junit, write_junit
+        if output_file:
+            write_junit(report, output_file)
+            console.print(f"[green]JUnit report written to {output_file}[/green]")
+        else:
+            click.echo(generate_junit(report))
+    else:
+        _print_report(report)
 
 
 @cli.command()

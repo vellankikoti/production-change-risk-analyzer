@@ -10,6 +10,7 @@ class Rule(ABC):
     name: str = ""
     description: str = ""
     severity: Severity = Severity.INFO
+    compliance: list[str] = []
 
     @abstractmethod
     def evaluate(self, change: ResourceChange) -> list[RuleFinding]:
@@ -30,11 +31,18 @@ class RuleEngine:
         self._rules.extend(rules)
 
     def evaluate(self, changes: list[ResourceChange]) -> list[RuleFinding]:
+        for rule in self._rules:
+            if hasattr(rule, 'set_template_context'):
+                rule.set_template_context(changes)
         findings: list[RuleFinding] = []
         for change in changes:
             for rule in self._rules:
                 if rule.applies_to(change):
-                    findings.extend(rule.evaluate(change))
+                    rule_findings = rule.evaluate(change)
+                    for f in rule_findings:
+                        if not f.compliance and rule.compliance:
+                            f.compliance = list(rule.compliance)
+                    findings.extend(rule_findings)
         return findings
 
     @property

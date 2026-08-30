@@ -20,7 +20,10 @@ from src.models.schemas import (
 from src.parser.cloudformation import diff_templates, parse_single_template, parse_template
 from src.rules.availability import get_all_availability_rules
 from src.rules.base import RuleEngine
+from src.rules.data import get_all_data_rules
+from src.rules.encryption import get_all_encryption_rules
 from src.rules.iam import get_all_iam_rules
+from src.rules.logging import get_all_logging_rules
 from src.rules.network import get_all_network_rules
 from src.rules.security_group import get_all_sg_rules
 
@@ -31,6 +34,9 @@ def _build_rule_engine() -> RuleEngine:
     engine.register_all(get_all_sg_rules())
     engine.register_all(get_all_network_rules())
     engine.register_all(get_all_availability_rules())
+    engine.register_all(get_all_encryption_rules())
+    engine.register_all(get_all_logging_rules())
+    engine.register_all(get_all_data_rules())
     return engine
 
 

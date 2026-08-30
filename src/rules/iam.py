@@ -72,6 +72,7 @@ class WildcardActionsRule(Rule):
     name = "Wildcard Actions"
     description = "Detects IAM policies granting Action: '*'"
     severity = Severity.CRITICAL
+    compliance = ["CIS 1.16", "AWS Config: iam-policy-no-statements-with-admin-access", "SecurityHub: IAM.1"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in IAM_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -101,6 +102,7 @@ class WildcardResourcesRule(Rule):
     name = "Wildcard Resources"
     description = "Detects IAM policies granting Resource: '*'"
     severity = Severity.HIGH
+    compliance = ["CIS 1.16", "AWS Config: iam-policy-no-statements-with-admin-access", "SecurityHub: IAM.1", "Well-Architected: SEC03-BP07"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in IAM_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -130,6 +132,7 @@ class CombinedWildcardRule(Rule):
     name = "Combined Wildcard Action and Resource"
     description = "Detects IAM policies granting Action: '*' and Resource: '*' (full admin)"
     severity = Severity.CRITICAL
+    compliance = ["CIS 1.16", "AWS Config: iam-policy-no-statements-with-admin-access", "SecurityHub: IAM.1", "Well-Architected: SEC03-BP07"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in IAM_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -159,6 +162,7 @@ class PrivilegeEscalationRule(Rule):
     name = "Privilege Escalation Patterns"
     description = "Detects IAM actions that enable privilege escalation"
     severity = Severity.HIGH
+    compliance = ["CIS 1.16", "SecurityHub: IAM.1", "Well-Architected: SEC03-BP06"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in IAM_RESOURCE_TYPES and change.change_type != ChangeType.DELETE
@@ -194,6 +198,7 @@ class BroadDataAccessRule(Rule):
     name = "Overly Permissive Data Access"
     description = "Detects IAM policies granting broad data service access (s3:*, dynamodb:*, etc.)"
     severity = Severity.MEDIUM
+    compliance = ["CIS 1.16", "AWS Config: iam-policy-no-statements-with-admin-access", "Well-Architected: SEC03-BP07"]
 
     def applies_to(self, change: ResourceChange) -> bool:
         return change.resource_type in IAM_RESOURCE_TYPES and change.change_type != ChangeType.DELETE

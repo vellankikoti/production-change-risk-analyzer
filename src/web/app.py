@@ -195,6 +195,9 @@ async def api_analyze(
 
 @app.get("/api/fixture/{name}")
 async def api_fixture(name: str):
+    import re
+    if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        raise HTTPException(status_code=400, detail="Invalid fixture name")
     fixture_dir = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "templates"
     filepath = fixture_dir / f"{name}.yaml"
     if not filepath.exists():

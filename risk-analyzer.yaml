@@ -1,0 +1,63 @@
+# Production Change Risk Analyzer — Configuration
+# Copy this file to your project root as risk-analyzer.yaml
+
+# Risk scoring thresholds (deterministic — AI never changes these)
+thresholds:
+  critical_min: 80   # Score >= 80 → CRITICAL → BLOCK
+  high_min: 60       # Score >= 60 → HIGH → REVIEW
+  medium_min: 40     # Score >= 40 → MEDIUM → REVIEW
+  low_max: 39        # Score <= 39 → LOW → APPROVE
+
+# AI analysis configuration
+ai:
+  enabled: true
+  model_id: amazon.nova-lite-v1:0   # Amazon Bedrock model ID
+  max_tokens: 2048
+  max_retries: 3
+
+# Notification settings
+notifications:
+  enabled: false
+  sns_topic_arn: ""   # Set via RISK_ANALYZER_SNS_TOPIC env var or here
+  notify_on:
+    - CRITICAL
+    - HIGH
+
+# Persistent storage
+storage:
+  dynamodb_table: ""  # Set via RISK_ANALYZER_TABLE env var or here
+  s3_bucket: ""       # Set via RISK_ANALYZER_BUCKET env var or here
+  save_reports: false
+  save_evidence: false
+
+# Default output format: rich | json | sarif | markdown | junit
+output_format: rich
+
+# Rule overrides — disable rules or change severity globally
+# rule_overrides:
+#   SG-002:
+#     severity: LOW        # Downgrade unrestricted ingress to LOW
+#   NET-001:
+#     enabled: false       # Disable public subnet check
+
+# Suppressions — accepted risks with audit trail
+# suppressions:
+#   - rule_id: SG-001
+#     resource_pattern: "DevSecurityGroup"
+#     reason: "Accepted risk for dev environment — ticket SEC-1234"
+#     expires: "2025-12-31T00:00:00Z"
+
+# Per-environment overrides (applied on top of global settings)
+# environments:
+#   production:
+#     thresholds:
+#       critical_min: 70    # Stricter in production
+#       high_min: 50
+#       medium_min: 30
+#     rule_overrides:
+#       SG-002:
+#         severity: HIGH    # Unrestricted ingress is HIGH in prod
+#   development:
+#     rule_overrides:
+#       SG-002:
+#         enabled: false    # Allow unrestricted ingress in dev

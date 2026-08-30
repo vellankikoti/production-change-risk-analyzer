@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template with encryption, logging, and data protection violations
+
+Resources:
+  UnencryptedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-unencrypted-bucket
+
+  UnencryptedDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      MasterUsername: admin
+      MasterUserPassword: secret123
+      StorageEncrypted: false
+      PubliclyAccessible: true
+      DeletionProtection: false
+
+  UnencryptedVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: us-west-2a
+      Size: 100
+      Encrypted: false
+
+  DisabledTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      TrailName: my-trail
+      S3BucketName: my-trail-bucket
+      IsLogging: false
