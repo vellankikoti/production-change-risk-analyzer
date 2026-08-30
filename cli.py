@@ -41,6 +41,7 @@ def _read_file(path: str) -> str:
 
 
 @click.group()
+@click.version_option(version="1.0.0", prog_name="risk-analyzer")
 def cli() -> None:
     """Production Change Risk Analyzer — Detect risky infrastructure changes before deployment."""
     pass

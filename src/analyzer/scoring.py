@@ -29,7 +29,7 @@ def _categorize_rule(rule_id: str) -> str:
     return RULE_CATEGORIES.get(prefix, "Other")
 
 
-def compute_score_breakdown(findings: list[RuleFinding], decision: str) -> ScoreBreakdown:
+def compute_score_breakdown(findings: list[RuleFinding], decision: str = "") -> ScoreBreakdown:
     if not findings:
         return ScoreBreakdown(
             contributions=[],

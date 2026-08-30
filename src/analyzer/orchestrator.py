@@ -46,41 +46,42 @@ def _build_rule_engine() -> RuleEngine:
     return engine
 
 
-def _compute_risk(
+def _determine_decision(
     findings: list[RuleFinding],
+    score: int,
     config: RiskAnalyzerConfig | None = None,
     block_on_high: bool = False,
-) -> tuple[RiskLevel, int, Decision, list[str]]:
+) -> tuple[RiskLevel, Decision, list[str]]:
+    """Determine risk level and decision from findings and the category-based score."""
     if not findings:
-        return RiskLevel.LOW, 5, Decision.APPROVE, ["No rule violations detected."]
+        return RiskLevel.LOW, Decision.APPROVE, ["No rule violations detected."]
 
     thresholds = config.thresholds if config else None
-    critical_min = thresholds.critical_min if thresholds else 80
-    high_min = thresholds.high_min if thresholds else 60
-    medium_min = thresholds.medium_min if thresholds else 40
+    block_threshold = thresholds.critical_min if thresholds else 80
+    review_threshold = thresholds.medium_min if thresholds else 40
 
     severities = {f.severity for f in findings}
     reasons = [f.finding for f in findings]
 
     if Severity.CRITICAL in severities:
-        critical_count = sum(1 for f in findings if f.severity == Severity.CRITICAL)
-        score = min(100, critical_min + critical_count * 5)
-        return RiskLevel.CRITICAL, score, Decision.BLOCK, reasons
+        risk_level = RiskLevel.CRITICAL
+    elif Severity.HIGH in severities:
+        risk_level = RiskLevel.HIGH
+    elif Severity.MEDIUM in severities:
+        risk_level = RiskLevel.MEDIUM
+    else:
+        risk_level = RiskLevel.LOW
 
-    if Severity.HIGH in severities:
-        high_count = sum(1 for f in findings if f.severity == Severity.HIGH)
-        score = min(critical_min - 1, high_min + high_count * 5)
-        decision = Decision.BLOCK if block_on_high else Decision.REVIEW
-        return RiskLevel.HIGH, score, decision, reasons
+    if score >= block_threshold or Severity.CRITICAL in severities:
+        decision = Decision.BLOCK
+    elif score >= review_threshold or (Severity.HIGH in severities and not block_on_high):
+        decision = Decision.REVIEW
+    elif Severity.HIGH in severities and block_on_high:
+        decision = Decision.BLOCK
+    else:
+        decision = Decision.APPROVE
 
-    if Severity.MEDIUM in severities:
-        medium_count = sum(1 for f in findings if f.severity == Severity.MEDIUM)
-        score = min(high_min - 1, medium_min + medium_count * 5)
-        return RiskLevel.MEDIUM, score, Decision.REVIEW, reasons
-
-    low_count = sum(1 for f in findings if f.severity == Severity.LOW)
-    score = min(medium_min - 1, 10 + low_count * 5)
-    return RiskLevel.LOW, score, Decision.APPROVE, reasons
+    return risk_level, decision, reasons
 
 
 class ChangeAnalyzer:
@@ -184,18 +185,20 @@ class ChangeAnalyzer:
             metadata=source_metadata,
         )
 
-        risk_level, risk_score, decision, reasons = _compute_risk(
-            findings, config=env_config, block_on_high=block_on_high,
+        score_breakdown = compute_score_breakdown(findings)
+        risk_score = score_breakdown.total_score
+
+        risk_level, decision, reasons = _determine_decision(
+            findings, risk_score, config=env_config, block_on_high=block_on_high,
         )
+
+        score_breakdown.decision = decision.value
 
         ai_analysis: AIAnalysis
         if self.use_ai and self._analyzer and findings:
             ai_analysis = self._analyzer.analyze(evidence)
         else:
             ai_analysis = AIAnalysis.empty()
-
-        dec_str = decision.value if isinstance(decision, Decision) else decision
-        score_breakdown = compute_score_breakdown(findings, dec_str)
 
         blast_radius = compute_blast_radius(parsed_template, changes) if parsed_template else None
 

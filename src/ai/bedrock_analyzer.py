@@ -53,9 +53,11 @@ MAX_EVIDENCE_CHARS = 15000
 class BedrockAnalyzer:
     def __init__(self, model_id: str | None = None, region: str | None = None, max_tokens: int = 2048) -> None:
         self.model_id = model_id or os.environ.get("RISK_ANALYZER_MODEL", "amazon.nova-lite-v1:0")
-        self.region = region or os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-west-2"))
         self.max_tokens = max_tokens
-        self._client = boto3.client("bedrock-runtime", region_name=self.region)
+        kwargs: dict[str, Any] = {}
+        if region:
+            kwargs["region_name"] = region
+        self._client = boto3.client("bedrock-runtime", **kwargs)
 
     def analyze(self, evidence: EvidencePackage) -> AIAnalysis:
         prompt = self._build_prompt(evidence)
