@@ -118,12 +118,21 @@ class SuppressionEntry:
 class EnvironmentOverrides:
     thresholds: ThresholdConfig | None = None
     rule_overrides: dict[str, RuleOverride] = field(default_factory=dict)
+    block_on_high: bool = False
+    disabled_rules: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EnvironmentOverrides:
         thresholds = ThresholdConfig.from_dict(data["thresholds"]) if "thresholds" in data else None
         rule_overrides = {k: RuleOverride.from_dict(v) for k, v in data.get("rule_overrides", {}).items()}
-        return cls(thresholds=thresholds, rule_overrides=rule_overrides)
+        for rule_id in data.get("disabled_rules", []):
+            rule_overrides[rule_id] = RuleOverride(enabled=False)
+        return cls(
+            thresholds=thresholds,
+            rule_overrides=rule_overrides,
+            block_on_high=data.get("block_on_high", False),
+            disabled_rules=data.get("disabled_rules", []),
+        )
 
 
 @dataclass
@@ -139,12 +148,15 @@ class RiskAnalyzerConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RiskAnalyzerConfig:
+        rule_overrides = {k: RuleOverride.from_dict(v) for k, v in data.get("rule_overrides", {}).items()}
+        for rule_id in data.get("disabled_rules", []):
+            rule_overrides[rule_id] = RuleOverride(enabled=False)
         return cls(
             thresholds=ThresholdConfig.from_dict(data.get("thresholds", {})),
             ai=AIConfig.from_dict(data.get("ai", {})),
             notifications=NotificationConfig.from_dict(data.get("notifications", {})),
             storage=StorageConfig.from_dict(data.get("storage", {})),
-            rule_overrides={k: RuleOverride.from_dict(v) for k, v in data.get("rule_overrides", {}).items()},
+            rule_overrides=rule_overrides,
             suppressions=[SuppressionEntry.from_dict(s) for s in data.get("suppressions", [])],
             environments={k: EnvironmentOverrides.from_dict(v) for k, v in data.get("environments", {}).items()},
             output_format=data.get("output_format", "rich"),

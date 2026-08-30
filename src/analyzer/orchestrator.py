@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.ai.bedrock_analyzer import BedrockAnalyzer
+from src.config import RiskAnalyzerConfig, load_config
 
 logger = logging.getLogger(__name__)
 from src.models.schemas import (
@@ -40,39 +41,57 @@ def _build_rule_engine() -> RuleEngine:
     return engine
 
 
-def _compute_risk(findings: list[RuleFinding]) -> tuple[RiskLevel, int, Decision, list[str]]:
+def _compute_risk(
+    findings: list[RuleFinding],
+    config: RiskAnalyzerConfig | None = None,
+    block_on_high: bool = False,
+) -> tuple[RiskLevel, int, Decision, list[str]]:
     if not findings:
         return RiskLevel.LOW, 5, Decision.APPROVE, ["No rule violations detected."]
+
+    thresholds = config.thresholds if config else None
+    critical_min = thresholds.critical_min if thresholds else 80
+    high_min = thresholds.high_min if thresholds else 60
+    medium_min = thresholds.medium_min if thresholds else 40
 
     severities = {f.severity for f in findings}
     reasons = [f.finding for f in findings]
 
     if Severity.CRITICAL in severities:
         critical_count = sum(1 for f in findings if f.severity == Severity.CRITICAL)
-        score = min(100, 80 + critical_count * 5)
+        score = min(100, critical_min + critical_count * 5)
         return RiskLevel.CRITICAL, score, Decision.BLOCK, reasons
 
     if Severity.HIGH in severities:
         high_count = sum(1 for f in findings if f.severity == Severity.HIGH)
-        score = min(79, 60 + high_count * 5)
-        return RiskLevel.HIGH, score, Decision.REVIEW, reasons
+        score = min(critical_min - 1, high_min + high_count * 5)
+        decision = Decision.BLOCK if block_on_high else Decision.REVIEW
+        return RiskLevel.HIGH, score, decision, reasons
 
     if Severity.MEDIUM in severities:
         medium_count = sum(1 for f in findings if f.severity == Severity.MEDIUM)
-        score = min(59, 40 + medium_count * 5)
+        score = min(high_min - 1, medium_min + medium_count * 5)
         return RiskLevel.MEDIUM, score, Decision.REVIEW, reasons
 
     low_count = sum(1 for f in findings if f.severity == Severity.LOW)
-    score = min(39, 10 + low_count * 5)
+    score = min(medium_min - 1, 10 + low_count * 5)
     return RiskLevel.LOW, score, Decision.APPROVE, reasons
 
 
 class ChangeAnalyzer:
-    def __init__(self, use_ai: bool = True, model_id: str | None = None, emit_metrics: bool = True) -> None:
+    def __init__(
+        self,
+        use_ai: bool = True,
+        model_id: str | None = None,
+        emit_metrics: bool = True,
+        config: RiskAnalyzerConfig | None = None,
+    ) -> None:
+        self.config = config
         self.engine = _build_rule_engine()
         self.use_ai = use_ai
         self.emit_metrics = emit_metrics
-        self._analyzer = BedrockAnalyzer(model_id=model_id) if use_ai else None
+        effective_model = model_id or (config.ai.model_id if config else None)
+        self._analyzer = BedrockAnalyzer(model_id=effective_model) if use_ai else None
         self._metrics = None
         if emit_metrics:
             try:
@@ -96,7 +115,37 @@ class ChangeAnalyzer:
         else:
             changes = parse_single_template(after_parsed)
 
-        findings = self.engine.evaluate(changes)
+        all_findings = self.engine.evaluate(changes)
+
+        env_config = None
+        block_on_high = False
+        if self.config:
+            env_config = self.config.for_environment(environment)
+            if environment in self.config.environments:
+                block_on_high = self.config.environments[environment].block_on_high
+
+        findings = []
+        for f in all_findings:
+            cfg = env_config or self.config
+            if cfg:
+                if not cfg.is_rule_enabled(f.rule_id):
+                    logger.debug("Rule %s disabled by config — skipping", f.rule_id)
+                    continue
+                if cfg.is_suppressed(f.rule_id, f.resource):
+                    logger.debug("Finding %s on %s suppressed by config", f.rule_id, f.resource)
+                    continue
+                override = cfg.rule_overrides.get(f.rule_id)
+                if override and override.severity:
+                    f = RuleFinding(
+                        rule_id=f.rule_id,
+                        severity=Severity(override.severity),
+                        resource=f.resource,
+                        finding=f.finding,
+                        evidence=f.evidence,
+                        remediation=f.remediation,
+                        compliance=f.compliance,
+                    )
+            findings.append(f)
 
         evidence = EvidencePackage.create(
             environment=environment,
@@ -105,7 +154,9 @@ class ChangeAnalyzer:
             metadata={"has_before": before_template is not None, "total_resources": len(changes)},
         )
 
-        risk_level, risk_score, decision, reasons = _compute_risk(findings)
+        risk_level, risk_score, decision, reasons = _compute_risk(
+            findings, config=env_config, block_on_high=block_on_high,
+        )
 
         ai_analysis: AIAnalysis
         if self.use_ai and self._analyzer and findings:

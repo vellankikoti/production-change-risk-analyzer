@@ -9,6 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from src.analyzer.orchestrator import ChangeAnalyzer
+from src.config import load_config
 from src.models.schemas import Decision, RiskLevel, Severity
 from src.notifications.sns import RiskNotifier
 from src.storage.dynamodb import RiskReportStore
@@ -56,6 +57,7 @@ def cli() -> None:
 @click.option("--json-output", is_flag=True, default=False, help="Output raw JSON instead of formatted report")
 @click.option("--format", "output_format", type=click.Choice(["rich", "json", "sarif", "markdown", "junit"]), default="rich", help="Output format")
 @click.option("--output-file", type=click.Path(), default=None, help="Write output to file instead of stdout")
+@click.option("--config", "config_path", type=click.Path(), default=None, help="Path to risk-analyzer.yaml config file")
 def analyze(
     before: str | None,
     after: str,
@@ -67,6 +69,7 @@ def analyze(
     json_output: bool,
     output_format: str,
     output_file: str | None,
+    config_path: str | None,
 ) -> None:
     """Analyze an infrastructure change for risks."""
     after_template = _read_file(after)
@@ -75,7 +78,11 @@ def analyze(
     if json_output:
         output_format = "json"
 
-    analyzer = ChangeAnalyzer(use_ai=not no_ai)
+    config = load_config(config_path)
+    if config.ai.enabled is False:
+        no_ai = True
+
+    analyzer = ChangeAnalyzer(use_ai=not no_ai, config=config)
 
     with console.status("[bold cyan]Analyzing infrastructure change..."):
         report = analyzer.analyze(
