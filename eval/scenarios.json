@@ -1,0 +1,62 @@
+[
+  {
+    "id": "EVAL-001",
+    "description": "Public database exposure — security group opens PostgreSQL to 0.0.0.0/0",
+    "before": "tests/fixtures/templates/secure_baseline.yaml",
+    "after": "tests/fixtures/templates/dangerous_changes.yaml",
+    "environment": "production",
+    "expected_risk_level": "CRITICAL",
+    "expected_decision": "BLOCK",
+    "expected_rule_ids": ["IAM-003", "SG-001", "SG-004", "AVAIL-001", "AVAIL-003", "AVAIL-005"]
+  },
+  {
+    "id": "EVAL-002",
+    "description": "IAM administrator permissions — Action: *, Resource: *",
+    "before": "tests/fixtures/templates/secure_baseline.yaml",
+    "after": "tests/fixtures/templates/dangerous_changes.yaml",
+    "environment": "production",
+    "expected_risk_level": "CRITICAL",
+    "expected_decision": "BLOCK",
+    "expected_rule_ids": ["IAM-003"]
+  },
+  {
+    "id": "EVAL-003",
+    "description": "Reducing production redundancy — ASG capacity reduced, Multi-AZ disabled",
+    "before": "tests/fixtures/templates/secure_baseline.yaml",
+    "after": "tests/fixtures/templates/dangerous_changes.yaml",
+    "environment": "production",
+    "expected_risk_level": "CRITICAL",
+    "expected_decision": "BLOCK",
+    "expected_rule_ids": ["AVAIL-001", "AVAIL-003", "AVAIL-005"]
+  },
+  {
+    "id": "EVAL-004",
+    "description": "Minor metadata/tag change — no security or availability impact",
+    "before": "tests/fixtures/templates/secure_baseline.yaml",
+    "after": "tests/fixtures/templates/minor_changes.yaml",
+    "environment": "production",
+    "expected_risk_level": "LOW",
+    "expected_decision": "APPROVE",
+    "expected_rule_ids": []
+  },
+  {
+    "id": "EVAL-005",
+    "description": "New stack with public ALB and broad S3 access — moderate risk",
+    "before": null,
+    "after": "tests/fixtures/templates/new_stack.yaml",
+    "environment": "staging",
+    "expected_risk_level": "MEDIUM",
+    "expected_decision": "REVIEW",
+    "expected_rule_ids": ["IAM-002"]
+  },
+  {
+    "id": "EVAL-006",
+    "description": "No changes — identical before and after",
+    "before": "tests/fixtures/templates/secure_baseline.yaml",
+    "after": "tests/fixtures/templates/secure_baseline.yaml",
+    "environment": "production",
+    "expected_risk_level": "LOW",
+    "expected_decision": "APPROVE",
+    "expected_rule_ids": []
+  }
+]
