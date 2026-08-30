@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Risk Analyzer{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid grid-4" style="margin-bottom: 24px;">
+    <div class="stat-card">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">Total Analyses</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" style="color: var(--critical);">{{ stats.by_decision.BLOCK }}</div>
+        <div class="stat-label">Blocked</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" style="color: var(--medium);">{{ stats.by_decision.REVIEW }}</div>
+        <div class="stat-label">Needs Review</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" style="color: var(--low);">{{ stats.by_decision.APPROVE }}</div>
+        <div class="stat-label">Approved</div>
+    </div>
+</div>
+
+<div class="grid grid-2" style="margin-bottom: 24px;">
+    <div class="card">
+        <h2>Risk Distribution</h2>
+        <div class="risk-chart">
+            {% set max_risk = [stats.by_risk_level.CRITICAL, stats.by_risk_level.HIGH, stats.by_risk_level.MEDIUM, stats.by_risk_level.LOW] | max %}
+            {% if max_risk > 0 %}
+            <div class="risk-bar" style="height: {{ (stats.by_risk_level.CRITICAL / max_risk * 100) | int }}%; background: var(--critical);" title="Critical: {{ stats.by_risk_level.CRITICAL }}"></div>
+            <div class="risk-bar" style="height: {{ (stats.by_risk_level.HIGH / max_risk * 100) | int }}%; background: var(--high);" title="High: {{ stats.by_risk_level.HIGH }}"></div>
+            <div class="risk-bar" style="height: {{ (stats.by_risk_level.MEDIUM / max_risk * 100) | int }}%; background: var(--medium);" title="Medium: {{ stats.by_risk_level.MEDIUM }}"></div>
+            <div class="risk-bar" style="height: {{ (stats.by_risk_level.LOW / max_risk * 100) | int }}%; background: var(--low);" title="Low: {{ stats.by_risk_level.LOW }}"></div>
+            {% endif %}
+        </div>
+        <div style="display: flex; justify-content: space-around; margin-top: 8px; font-size: 12px; color: var(--text-dim);">
+            <span>Critical ({{ stats.by_risk_level.CRITICAL }})</span>
+            <span>High ({{ stats.by_risk_level.HIGH }})</span>
+            <span>Medium ({{ stats.by_risk_level.MEDIUM }})</span>
+            <span>Low ({{ stats.by_risk_level.LOW }})</span>
+        </div>
+    </div>
+    <div class="card">
+        <h2>Block Rate</h2>
+        <div style="text-align: center; padding: 12px 0;">
+            <div style="font-size: 48px; font-weight: 800; color: {% if stats.block_rate > 50 %}var(--critical){% elif stats.block_rate > 25 %}var(--medium){% else %}var(--low){% endif %};">
+                {{ stats.block_rate }}%
+            </div>
+            <div style="font-size: 13px; color: var(--text-dim); margin-top: 4px;">of changes blocked</div>
+        </div>
+        <div class="score-bar">
+            <div class="score-fill" style="width: {{ stats.block_rate }}%; background: {% if stats.block_rate > 50 %}var(--critical){% elif stats.block_rate > 25 %}var(--medium){% else %}var(--low){% endif %};"></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin-bottom: 0;">Recent Reports</h2>
+        <a href="/analyze" class="btn btn-primary">New Analysis</a>
+    </div>
+    {% if reports %}
+    <table>
+        <thead>
+            <tr>
+                <th>Change ID</th>
+                <th>Timestamp</th>
+                <th>Environment</th>
+                <th>Risk Level</th>
+                <th>Score</th>
+                <th>Decision</th>
+                <th>Findings</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reports %}
+            <tr>
+                <td><a class="report-link" href="/report/{{ r.change_id }}">{{ r.change_id }}</a></td>
+                <td>{{ r.timestamp[:19] if r.timestamp else '' }}</td>
+                <td>{{ r.environment or '' }}</td>
+                <td><span class="badge badge-{{ (r.risk_level or 'low') | lower }}">{{ r.risk_level or '' }}</span></td>
+                <td>{{ r.risk_score }}/100</td>
+                <td><span class="badge badge-{{ (r.decision or 'approve') | lower }}">{{ r.decision or '' }}</span></td>
+                <td>{{ (r.evidence.findings | length) if r.evidence and r.evidence.findings else (r.get('reasons', []) | length) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No reports yet. <a href="/analyze" style="color: var(--accent);">Run your first analysis</a>.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

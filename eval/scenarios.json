@@ -45,9 +45,9 @@
     "before": null,
     "after": "tests/fixtures/templates/new_stack.yaml",
     "environment": "staging",
-    "expected_risk_level": "MEDIUM",
+    "expected_risk_level": "HIGH",
     "expected_decision": "REVIEW",
-    "expected_rule_ids": ["IAM-002"]
+    "expected_rule_ids": ["IAM-002", "SG-002"]
   },
   {
     "id": "EVAL-006",

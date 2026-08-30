@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Analyze Change — Risk Analyzer{% endblock %}
+{% block content %}
+<h1>Analyze Infrastructure Change</h1>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div class="card">
+    <form method="post" action="/analyze" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>After Template (proposed change) *</label>
+            <input type="file" name="after_template" accept=".yaml,.yml,.json,.template" required>
+            <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px;">CloudFormation template (YAML or JSON)</div>
+        </div>
+
+        <div class="form-group">
+            <label>Before Template (current state)</label>
+            <input type="file" name="before_template" accept=".yaml,.yml,.json,.template">
+            <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px;">Optional — omit for new stack analysis</div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Target Environment</label>
+                <select name="environment">
+                    <option value="development">Development</option>
+                    <option value="staging">Staging</option>
+                    <option value="production">Production</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>&nbsp;</label>
+                <div class="checkbox-group">
+                    <input type="checkbox" name="use_ai" id="use_ai" value="true" checked>
+                    <label for="use_ai" style="margin-bottom: 0; font-weight: 400;">Enable AI analysis (Bedrock)</label>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Analyze Change</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Quick Test</h2>
+    <p style="font-size: 14px; color: var(--text-dim); margin-bottom: 16px;">Use the built-in fixture templates for testing:</p>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn btn-secondary" onclick="loadFixture('dangerous')">Dangerous Changes (BLOCK)</button>
+        <button class="btn btn-secondary" onclick="loadFixture('minor')">Minor Changes (APPROVE)</button>
+        <button class="btn btn-secondary" onclick="loadFixture('new')">New Stack (REVIEW)</button>
+    </div>
+</div>
+
+<script>
+async function loadFixture(type) {
+    const fixtures = {
+        dangerous: { before: 'secure_baseline', after: 'dangerous_changes', env: 'production' },
+        minor: { before: 'secure_baseline', after: 'minor_changes', env: 'development' },
+        new: { before: null, after: 'new_stack', env: 'staging' },
+    };
+    const f = fixtures[type];
+    const form = new FormData();
+
+    const afterResp = await fetch(`/api/fixture/${f.after}`);
+    const afterBlob = await afterResp.blob();
+    form.append('after_template', afterBlob, `${f.after}.yaml`);
+
+    if (f.before) {
+        const beforeResp = await fetch(`/api/fixture/${f.before}`);
+        const beforeBlob = await beforeResp.blob();
+        form.append('before_template', beforeBlob, `${f.before}.yaml`);
+    }
+    form.append('environment', f.env);
+    form.append('use_ai', 'true');
+
+    const resp = await fetch('/analyze', { method: 'POST', body: form });
+    document.open();
+    document.write(await resp.text());
+    document.close();
+}
+</script>
+{% endblock %}

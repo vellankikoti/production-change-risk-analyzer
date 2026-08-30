@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
 from src.ai.bedrock_analyzer import BedrockAnalyzer
+
+logger = logging.getLogger(__name__)
 from src.models.schemas import (
     AIAnalysis,
     Decision,
@@ -58,10 +62,18 @@ def _compute_risk(findings: list[RuleFinding]) -> tuple[RiskLevel, int, Decision
 
 
 class ChangeAnalyzer:
-    def __init__(self, use_ai: bool = True, model_id: str | None = None) -> None:
+    def __init__(self, use_ai: bool = True, model_id: str | None = None, emit_metrics: bool = True) -> None:
         self.engine = _build_rule_engine()
         self.use_ai = use_ai
+        self.emit_metrics = emit_metrics
         self._analyzer = BedrockAnalyzer(model_id=model_id) if use_ai else None
+        self._metrics = None
+        if emit_metrics:
+            try:
+                from src.observability.metrics import RiskMetrics
+                self._metrics = RiskMetrics()
+            except Exception:
+                logger.debug("CloudWatch metrics unavailable — skipping")
 
     def analyze(
         self,
@@ -69,6 +81,7 @@ class ChangeAnalyzer:
         before_template: str | None = None,
         environment: str = "development",
     ) -> RiskReport:
+        start_time = time.monotonic()
         after_parsed = parse_template(after_template)
 
         if before_template:
@@ -94,7 +107,7 @@ class ChangeAnalyzer:
         else:
             ai_analysis = AIAnalysis.empty()
 
-        return RiskReport(
+        report = RiskReport(
             change_id=evidence.change_id,
             timestamp=evidence.timestamp,
             risk_level=risk_level,
@@ -104,3 +117,25 @@ class ChangeAnalyzer:
             ai_analysis=ai_analysis,
             reasons=reasons,
         )
+
+        duration_ms = (time.monotonic() - start_time) * 1000
+        if self._metrics:
+            try:
+                self._metrics.record_analysis(
+                    change_id=report.change_id,
+                    risk_level=risk_level.value,
+                    risk_score=risk_score,
+                    decision=decision.value,
+                    environment=environment,
+                    finding_count=len(findings),
+                    duration_ms=duration_ms,
+                    ai_used=self.use_ai and bool(findings),
+                )
+                self._metrics.record_rule_findings(
+                    [f.to_dict() for f in findings],
+                    environment=environment,
+                )
+            except Exception:
+                logger.debug("Failed to emit metrics — non-critical")
+
+        return report

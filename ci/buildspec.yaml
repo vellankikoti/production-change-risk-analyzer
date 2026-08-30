@@ -1,0 +1,65 @@
+version: 0.2
+
+env:
+  variables:
+    RISK_ANALYZER_TABLE: "risk-analyzer-reports-dev"
+    RISK_ANALYZER_BUCKET: "risk-analyzer-evidence-dev"
+    RISK_ANALYZER_MODEL: "amazon.nova-lite-v1:0"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - pip install uv
+      - uv venv .venv
+      - source .venv/bin/activate
+      - uv pip install -r requirements.txt
+
+  pre_build:
+    commands:
+      - source .venv/bin/activate
+      - echo "Running unit tests..."
+      - python -m pytest tests/ -v --tb=short
+      - echo "Running evaluation scenarios (deterministic)..."
+      - python cli.py eval
+      - echo "All pre-build checks passed"
+
+  build:
+    commands:
+      - source .venv/bin/activate
+      - |
+        if [ -n "$BEFORE_TEMPLATE" ] && [ -n "$AFTER_TEMPLATE" ]; then
+          echo "Analyzing infrastructure change..."
+          python cli.py analyze \
+            --before "$BEFORE_TEMPLATE" \
+            --after "$AFTER_TEMPLATE" \
+            --environment "${ENVIRONMENT:-staging}" \
+            --save \
+            --save-evidence \
+            --notify \
+            --json-output > risk-report.json
+          DECISION=$(python -c "import json; print(json.load(open('risk-report.json'))['decision'])")
+          echo "Decision: $DECISION"
+          if [ "$DECISION" = "BLOCK" ]; then
+            echo "BLOCKED: Infrastructure change has critical risk findings"
+            exit 1
+          fi
+        else
+          echo "No templates provided — skipping analysis"
+        fi
+
+  post_build:
+    commands:
+      - echo "Build completed at $(date)"
+
+artifacts:
+  files:
+    - risk-report.json
+  discard-paths: yes
+
+reports:
+  risk-analysis:
+    files:
+      - risk-report.json
+    file-format: NONE

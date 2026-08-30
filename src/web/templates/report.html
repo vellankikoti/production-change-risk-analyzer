@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Report {{ report.change_id }} — Risk Analyzer{% endblock %}
+{% block content %}
+
+{% set risk_level = report.risk_level %}
+{% set decision = report.decision %}
+{% set risk_color = {'CRITICAL': 'critical', 'HIGH': 'high', 'MEDIUM': 'medium', 'LOW': 'low'}.get(risk_level, 'low') %}
+{% set decision_color = {'BLOCK': 'block', 'REVIEW': 'review', 'APPROVE': 'approve'}.get(decision, 'approve') %}
+
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+    <div>
+        <h1 style="margin-bottom: 4px;">Report: {{ report.change_id }}</h1>
+        <div style="color: var(--text-dim); font-size: 14px;">
+            {{ report.evidence.environment | title }} &middot; {{ report.timestamp[:19] }}
+        </div>
+    </div>
+    <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+
+<div class="grid grid-3" style="margin-bottom: 24px;">
+    <div class="stat-card" style="border-color: var(--{{ risk_color }});">
+        <div class="stat-value" style="color: var(--{{ risk_color }});">{{ risk_level }}</div>
+        <div class="stat-label">Risk Level</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ report.risk_score }}<span style="font-size: 18px; color: var(--text-dim);">/100</span></div>
+        <div class="stat-label">Risk Score</div>
+        <div class="score-bar">
+            <div class="score-fill" style="width: {{ report.risk_score }}%; background: var(--{{ risk_color }});"></div>
+        </div>
+    </div>
+    <div class="stat-card" style="border-color: var(--{{ decision_color }});">
+        <div class="stat-value" style="color: var(--{{ decision_color }});">{{ decision }}</div>
+        <div class="stat-label">Decision</div>
+    </div>
+</div>
+
+{% if report.evidence.changes %}
+<div class="card section">
+    <div class="section-title">Resource Changes ({{ report.evidence.changes | length }})</div>
+    <table>
+        <thead>
+            <tr><th>Resource</th><th>Type</th><th>Change</th></tr>
+        </thead>
+        <tbody>
+            {% for ch in report.evidence.changes %}
+            {% set ct = ch.change_type %}
+            {% set ct_color = {'CREATE': 'low', 'MODIFY': 'medium', 'DELETE': 'critical'}.get(ct, '') %}
+            <tr>
+                <td style="font-weight: 600;">{{ ch.resource_id }}</td>
+                <td style="color: var(--text-dim);">{{ ch.resource_type }}</td>
+                <td><span class="badge badge-{{ ct_color }}">{{ ct }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if report.evidence.findings %}
+<div class="card section">
+    <div class="section-title">Rule Findings ({{ report.evidence.findings | length }})</div>
+    <table>
+        <thead>
+            <tr><th>Rule</th><th>Severity</th><th>Resource</th><th>Finding</th><th>Remediation</th></tr>
+        </thead>
+        <tbody>
+            {% for f in report.evidence.findings %}
+            {% set sev = f.severity if f.severity is string else f.severity.value %}
+            <tr>
+                <td style="font-weight: 600; white-space: nowrap;">{{ f.rule_id }}</td>
+                <td><span class="badge badge-{{ sev | lower }}">{{ sev }}</span></td>
+                <td>{{ f.resource }}</td>
+                <td>{{ f.finding }}</td>
+                <td style="color: var(--text-dim); font-size: 13px;">{{ f.remediation }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% set ai = report.ai_analysis %}
+{% if ai and ai.explanation %}
+<div class="card section">
+    <div class="section-title">AI Analysis</div>
+
+    <div style="margin-bottom: 20px;">
+        <h2 style="font-size: 15px; margin-bottom: 8px;">Explanation</h2>
+        <p style="font-size: 14px;">{{ ai.explanation }}</p>
+    </div>
+
+    {% if ai.blast_radius %}
+    <div style="margin-bottom: 20px;">
+        <h2 style="font-size: 15px; margin-bottom: 8px;">Blast Radius</h2>
+        <p style="font-size: 14px;">{{ ai.blast_radius }}</p>
+    </div>
+    {% endif %}
+
+    {% if ai.operational_impact %}
+    <div style="margin-bottom: 20px;">
+        <h2 style="font-size: 15px; margin-bottom: 8px;">Operational Impact</h2>
+        <p style="font-size: 14px;">{{ ai.operational_impact }}</p>
+    </div>
+    {% endif %}
+
+    {% if ai.remediation %}
+    <div style="margin-bottom: 20px;">
+        <h2 style="font-size: 15px; margin-bottom: 8px;">Recommended Remediation</h2>
+        <p style="font-size: 14px;">{{ ai.remediation }}</p>
+    </div>
+    {% endif %}
+
+    {% if ai.confidence %}
+    <div style="margin-bottom: 20px;">
+        <h2 style="font-size: 15px; margin-bottom: 8px;">Confidence</h2>
+        <span class="badge badge-{% if ai.confidence == 'HIGH' %}low{% elif ai.confidence == 'MEDIUM' %}medium{% else %}high{% endif %}">{{ ai.confidence }}</span>
+    </div>
+    {% endif %}
+</div>
+
+{% if ai.facts %}
+<div class="card section">
+    <div class="section-title">Facts (Verified from Evidence)</div>
+    {% for f in ai.facts %}
+    <div class="fact-item">{{ f }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if ai.inferences %}
+<div class="card section">
+    <div class="section-title">Inferences (AI-Derived)</div>
+    {% for i in ai.inferences %}
+    <div class="inference-item">{{ i }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% endblock %}

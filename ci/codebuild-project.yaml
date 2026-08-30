@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodeBuild project for Production Change Risk Analyzer CI pipeline
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  SourceBucket:
+    Type: String
+    Description: S3 bucket containing source code
+  RiskAnalyzerTable:
+    Type: String
+    Default: risk-analyzer-reports-dev
+  RiskAnalyzerBucket:
+    Type: String
+    Description: S3 bucket for evidence storage
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "risk-analyzer-codebuild-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildBase
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "arn:aws:s3:::${SourceBucket}/*"
+        - PolicyName: RiskAnalyzerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Sub "arn:aws:dynamodb:*:*:table/${RiskAnalyzerTable}"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${RiskAnalyzerBucket}/*"
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Sub "arn:aws:sns:*:*:risk-analyzer-alerts-${Environment}"
+
+  RiskAnalyzerBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "risk-analyzer-${Environment}"
+      Description: Analyze infrastructure changes for risk
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: RISK_ANALYZER_TABLE
+            Value: !Ref RiskAnalyzerTable
+          - Name: RISK_ANALYZER_BUCKET
+            Value: !Ref RiskAnalyzerBucket
+      Source:
+        Type: S3
+        Location: !Sub "${SourceBucket}/risk-analyzer/source.zip"
+        BuildSpec: ci/buildspec.yaml
+      TimeoutInMinutes: 10
+
+Outputs:
+  ProjectName:
+    Value: !Ref RiskAnalyzerBuild
+  ProjectArn:
+    Value: !GetAtt RiskAnalyzerBuild.Arn
