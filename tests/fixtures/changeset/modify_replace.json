@@ -1,0 +1,103 @@
+{
+  "ChangeSetId": "arn:aws:cloudformation:us-east-1:123456789012:changeSet/my-changeset/abc123",
+  "ChangeSetName": "my-changeset",
+  "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/my-stack/def456",
+  "StackName": "my-stack",
+  "Status": "CREATE_COMPLETE",
+  "ExecutionStatus": "AVAILABLE",
+  "Changes": [
+    {
+      "Type": "Resource",
+      "ResourceChange": {
+        "Action": "Modify",
+        "LogicalResourceId": "AppDatabase",
+        "ResourceType": "AWS::RDS::DBInstance",
+        "PhysicalResourceId": "my-database-instance",
+        "Replacement": "True",
+        "Details": [
+          {
+            "Target": {
+              "Attribute": "Properties",
+              "Name": "Engine",
+              "RequiresRecreation": "Always"
+            },
+            "ChangeSource": "DirectModification",
+            "Evaluation": "Static"
+          },
+          {
+            "Target": {
+              "Attribute": "Properties",
+              "Name": "DBInstanceClass",
+              "RequiresRecreation": "Never"
+            },
+            "ChangeSource": "DirectModification",
+            "Evaluation": "Static"
+          }
+        ]
+      }
+    },
+    {
+      "Type": "Resource",
+      "ResourceChange": {
+        "Action": "Modify",
+        "LogicalResourceId": "AppSecurityGroup",
+        "ResourceType": "AWS::EC2::SecurityGroup",
+        "PhysicalResourceId": "sg-12345678",
+        "Replacement": "False",
+        "Details": [
+          {
+            "Target": {
+              "Attribute": "Properties",
+              "Name": "SecurityGroupIngress",
+              "RequiresRecreation": "Never"
+            },
+            "ChangeSource": "DirectModification",
+            "Evaluation": "Static"
+          }
+        ]
+      }
+    },
+    {
+      "Type": "Resource",
+      "ResourceChange": {
+        "Action": "Add",
+        "LogicalResourceId": "NewBucket",
+        "ResourceType": "AWS::S3::Bucket",
+        "Replacement": "False",
+        "Details": []
+      }
+    },
+    {
+      "Type": "Resource",
+      "ResourceChange": {
+        "Action": "Remove",
+        "LogicalResourceId": "OldLambda",
+        "ResourceType": "AWS::Lambda::Function",
+        "PhysicalResourceId": "my-old-function",
+        "Replacement": "False",
+        "Details": []
+      }
+    },
+    {
+      "Type": "Resource",
+      "ResourceChange": {
+        "Action": "Modify",
+        "LogicalResourceId": "WebServer",
+        "ResourceType": "AWS::EC2::Instance",
+        "PhysicalResourceId": "i-abc123",
+        "Replacement": "Conditional",
+        "Details": [
+          {
+            "Target": {
+              "Attribute": "Properties",
+              "Name": "InstanceType",
+              "RequiresRecreation": "Conditionally"
+            },
+            "ChangeSource": "DirectModification",
+            "Evaluation": "Static"
+          }
+        ]
+      }
+    }
+  ]
+}

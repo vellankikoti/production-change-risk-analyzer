@@ -1,0 +1,92 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.7.0",
+  "planned_values": {},
+  "resource_changes": [
+    {
+      "address": "aws_security_group.app",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "app",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "description": "Application security group",
+          "vpc_id": "vpc-12345678",
+          "ingress": [
+            {
+              "from_port": 443,
+              "to_port": 443,
+              "protocol": "tcp",
+              "cidr_blocks": ["10.0.0.0/16"],
+              "ipv6_cidr_blocks": [],
+              "self": false,
+              "description": "HTTPS from VPC"
+            }
+          ],
+          "egress": []
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_db_instance.main",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "engine": "postgres",
+          "instance_class": "db.r5.large",
+          "multi_az": true,
+          "backup_retention_period": 7,
+          "storage_encrypted": true,
+          "publicly_accessible": false,
+          "deletion_protection": true
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.app",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "app",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "app-role",
+          "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ecs-tasks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}",
+          "inline_policy": [
+            {
+              "name": "app-policy",
+              "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::my-app-bucket/*\"}]}"
+            }
+          ]
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_s3_bucket.data",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "data",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["no-op"],
+        "before": {"bucket": "existing-bucket"},
+        "after": {"bucket": "existing-bucket"},
+        "after_unknown": {}
+      }
+    }
+  ],
+  "configuration": {}
+}

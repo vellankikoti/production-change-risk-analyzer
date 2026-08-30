@@ -1,6 +1,6 @@
 # Production Change Risk Analyzer
 
-**Evidence-based infrastructure change risk analysis for AWS CloudFormation.** 27 deterministic rules detect security, availability, encryption, logging, and data protection risks. AI explains the findings — it never decides BLOCK or APPROVE.
+**Production Change Intelligence Platform.** Know what could break before you deploy. 27 deterministic rules analyze CloudFormation and Terraform changes for security, availability, encryption, logging, and data protection risks. Explainable scoring, blast radius analysis, rollback risk assessment, and policy-as-code — with optional AI explanation. The AI never decides BLOCK or APPROVE.
 
 [![CI](https://github.com/vellankikoti/production-change-risk-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/vellankikoti/production-change-risk-analyzer/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -24,13 +24,16 @@ These patterns are **detectable before deployment**, not after an incident.
 
 | Feature | This Tool | Typical IaC Scanners |
 |:--------|:----------|:--------------------|
-| Decision model | Deterministic thresholds (never AI) | AI/ML black box or simple pass/fail |
-| AI role | Explains findings with FACT/INFERENCE separation | N/A or unstructured |
-| Compliance | Every rule mapped to CIS, SecurityHub, Config, Well-Architected | Partial or manual |
-| Before/after diff | Compares current vs proposed templates | Scans proposed only |
-| Output formats | Rich, JSON, SARIF, Markdown, JUnit | Usually one or two |
-| Configuration | Per-environment thresholds, suppressions with expiry | Global on/off |
-| AWS dependency | Optional — works fully offline with `--no-ai` | Usually required |
+| **Decision model** | Deterministic thresholds (never AI) | AI/ML black box or simple pass/fail |
+| **Multi-provider** | CloudFormation + Terraform + AWS ChangeSets | Usually one provider |
+| **Explainable scoring** | Category breakdown — every point traceable | Single number or pass/fail |
+| **Blast radius** | Dependency graph from Ref/GetAtt/DependsOn | N/A |
+| **Rollback risk** | Per-resource rollback difficulty assessment | N/A |
+| **Policy-as-Code** | YAML policies with change freezes, environment overrides | Hardcoded or none |
+| **AI role** | Explains findings with FACT/INFERENCE separation | N/A or unstructured |
+| **Compliance** | Every rule mapped to CIS, SecurityHub, Config, Well-Architected | Partial or manual |
+| **Output formats** | Rich, JSON, SARIF, Markdown, JUnit | Usually one or two |
+| **AWS dependency** | Optional — works fully offline with `--no-ai` | Usually required |
 
 ---
 
@@ -39,7 +42,7 @@ These patterns are **detectable before deployment**, not after an incident.
 ```mermaid
 flowchart TB
     subgraph Input
-        A[CloudFormation Template<br/>Before + After YAML/JSON]
+        A[CloudFormation / Terraform / ChangeSet<br/>Before + After]
     end
 
     subgraph Parser
@@ -138,16 +141,15 @@ sequenceDiagram
 ### Step 1: Install (2 minutes)
 
 ```bash
+# Option A: pip install (recommended)
+pip install change-risk-analyzer
+risk-analyzer --help
+
+# Option B: From source
 git clone https://github.com/vellankikoti/production-change-risk-analyzer.git
 cd production-change-risk-analyzer
-
-# Using uv (recommended)
 uv venv && source .venv/bin/activate
 uv pip install -r requirements.txt
-
-# Or using pip
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
 ```
 
 ### Step 2: Run the examples (30 seconds)
@@ -387,6 +389,147 @@ Thresholds are configurable per environment via `risk-analyzer.yaml`.
 
 ---
 
+## Terraform Support
+
+Analyze Terraform plans with the same 27 rules. Auto-detected from file content.
+
+```bash
+# Generate a Terraform plan
+terraform plan -out=tfplan
+terraform show -json tfplan > plan.json
+
+# Analyze it (auto-detects Terraform format)
+python cli.py analyze --after plan.json --no-ai
+
+# Or explicitly specify source
+python cli.py analyze --after plan.json --source terraform --no-ai --environment production
+```
+
+Terraform resource types are mapped to their CloudFormation equivalents so the same rules engine works for both:
+
+| Terraform | CloudFormation | Rules Applied |
+|:----------|:--------------|:-------------|
+| `aws_security_group` | `AWS::EC2::SecurityGroup` | SG-001 – SG-004 |
+| `aws_db_instance` | `AWS::RDS::DBInstance` | AVAIL-003, AVAIL-005, ENC-002, RDS-001, DEL-001 |
+| `aws_s3_bucket` | `AWS::S3::Bucket` | ENC-001, LOG-001, S3-001 |
+| `aws_iam_role` / `aws_iam_policy` | `AWS::IAM::Role` | IAM-001 – IAM-005 |
+| `aws_ebs_volume` | `AWS::EC2::Volume` | ENC-003 |
+| `aws_cloudtrail` | `AWS::CloudTrail::Trail` | LOG-002, LOG-003 |
+| `aws_autoscaling_group` | `AWS::AutoScaling::AutoScalingGroup` | AVAIL-001, AVAIL-002 |
+
+---
+
+## AWS ChangeSet Support
+
+Analyze real AWS CloudFormation ChangeSets — see what AWS will actually do:
+
+```bash
+# From a saved changeset JSON
+python cli.py analyze --after changeset.json --source changeset --no-ai
+
+# Detect replacement operations
+# ChangeSets tell you if a resource requires replacement (downtime risk)
+```
+
+ChangeSet analysis adds replacement detection — when AWS must destroy and recreate a resource, the rollback risk automatically escalates to CRITICAL.
+
+---
+
+## Blast Radius Analysis
+
+Every report includes a dependency graph showing what resources are affected by each change.
+
+```
+Blast Radius: HIGH (8 resources affected)
+  DatabaseSecurityGroup (changed)
+  ├── Database (depends via VPCSecurityGroups)
+  │   └── DBSubnetGroup (depends via Ref)
+  └── AppSecurityGroup (transitively affected)
+  AppRole (changed)
+  └── LaunchConfig (depends via IamInstanceProfile)
+```
+
+Dependencies are extracted from:
+- `Ref` references
+- `Fn::GetAtt` attribute lookups
+- `DependsOn` declarations
+- `Fn::Sub` variable interpolation
+- Security group references in VPCSecurityGroups
+
+Blast radius severity: LOW (1-2 affected), MEDIUM (3-5), HIGH (6-10), CRITICAL (11+).
+
+---
+
+## Rollback Risk Assessment
+
+Each changed resource is assessed for rollback difficulty:
+
+```
+Rollback Risk: HIGH
+  Database (DELETE) — CRITICAL: Database deletion cannot be automatically rolled back
+  AppRole (MODIFY)  — LOW: IAM policy changes are reversible
+  ASG (MODIFY)      — LOW: Property changes are reversible
+```
+
+| Change Type | Rollback Risk | Reason |
+|:------------|:-------------|:-------|
+| CREATE | LOW | Delete the new resource |
+| MODIFY (non-replacement) | LOW | Revert property changes |
+| MODIFY (replacement) | CRITICAL | Resource was destroyed and recreated |
+| DELETE (critical resource) | CRITICAL | Cannot be automatically restored |
+| DELETE (non-critical) | MEDIUM | May need manual recreation |
+
+Replacement-triggering properties are tracked for: RDS (Engine, DBInstanceIdentifier), EC2 (ImageId, SubnetId), S3 (BucketName), Security Groups (VpcId), and more.
+
+---
+
+## Policy-as-Code
+
+Define organizational policies in YAML — no Python code needed:
+
+```yaml
+# policies.yaml
+policies:
+  # Block production database deletion
+  - id: PROD-DB-001
+    name: "Block production database deletion"
+    when:
+      environment: production
+      resource_type: "AWS::RDS::DBInstance"
+      change_type: DELETE
+    decision: BLOCK
+    reason: "Production database deletion requires CAB approval"
+
+  # Holiday change freeze
+  - id: FREEZE-001
+    name: "Holiday change freeze"
+    when:
+      environment: production
+      after: "2026-12-20T00:00:00Z"
+      before: "2027-01-02T00:00:00Z"
+    decision: BLOCK
+    reason: "Holiday change freeze — no production deployments"
+
+  # Allow broader access in development
+  - id: DEV-ALLOW-001
+    name: "Allow broad access in dev"
+    when:
+      environment: development
+      severity_max: HIGH
+    decision: APPROVE
+    reason: "Development allows higher risk tolerance"
+```
+
+```bash
+python cli.py analyze --after template.yaml --policies policies.yaml --no-ai
+```
+
+**12 condition types:** environment, resource_type, change_type, rules_triggered, severity_max, risk_score_min, risk_score_max, finding_count_min, resource_id (glob), after/before (date range for change freezes).
+
+When multiple policies match, the **most restrictive decision wins**. See [`policies.example.yaml`](policies.example.yaml) for a complete example.
+
+---
+
 ## AI Analysis: FACT vs INFERENCE
 
 When AI is enabled, the evidence package is sent to Amazon Bedrock. The system prompt enforces strict structure:
@@ -493,18 +636,23 @@ flowchart LR
     G -->|APPROVE/REVIEW| P[Pass check ✅]
 ```
 
-**Setup (3 steps):**
+**Option A: GitHub Action (simplest)**
 
-1. Copy `.github/workflows/risk-analyze.yml` to your repo
-2. Copy this project's `cli.py`, `src/`, and `requirements.txt` to your repo (or install as a package)
-3. Optionally set `AWS_REGION` as a repository variable
+```yaml
+- name: Analyze infrastructure risk
+  uses: vellankikoti/production-change-risk-analyzer@v1
+  with:
+    after: infra/template.yaml
+    environment: production
+    fail-on: block                   # block, review, or any
+```
 
-That's it. The workflow triggers automatically on PRs that change CloudFormation files in `infra/`, `cloudformation/`, `templates/`, or `cfn/` directories.
+The action outputs `decision`, `risk-level`, `risk-score`, and `finding-count` for use in subsequent steps.
 
-**What happens on every PR:**
-- Detects which CloudFormation files changed
-- Runs deterministic analysis (fast, no AI needed)
-- Uploads SARIF to GitHub Security tab (findings appear inline on the diff)
+**Option B: Full workflow** — Copy `.github/workflows/risk-analyze.yml` to your repo. It automatically:
+- Detects CloudFormation file changes in PRs
+- Runs deterministic analysis per file
+- Uploads SARIF to GitHub Security tab (findings inline on the diff)
 - Posts a Markdown summary as a PR comment
 - Fails the check if any file triggers BLOCK
 
@@ -816,21 +964,31 @@ Compliance tags appear in **SARIF output** (GitHub Security tab), **Markdown rep
 production-change-risk-analyzer/
 ├── cli.py                         # CLI: analyze, eval, report, list, trending, dashboard, subscribe
 ├── web_server.py                  # FastAPI web dashboard launcher
+├── action.yml                     # GitHub Action for marketplace
 ├── Dockerfile                     # Container image (python:3.12-slim)
 ├── risk-analyzer.yaml             # Default configuration (annotated)
+├── policies.example.yaml          # Policy-as-Code examples
 ├── requirements.txt               # Python dependencies
-├── pyproject.toml                 # Package metadata
+├── pyproject.toml                 # Package metadata (pip install change-risk-analyzer)
 ├── LICENSE                        # MIT License
 ├── src/
-│   ├── analyzer/orchestrator.py   # Pipeline: parse → rules → config filter → AI → decision
+│   ├── analyzer/
+│   │   ├── orchestrator.py        # Pipeline: parse → rules → config → scoring → AI → decision
+│   │   ├── scoring.py             # Category-based explainable scoring
+│   │   ├── blast_radius.py        # Dependency graph and blast radius engine
+│   │   └── rollback.py            # Rollback risk assessment
 │   ├── ai/bedrock_analyzer.py     # Bedrock (retry, token protection, FACT/INFERENCE prompt)
 │   ├── config.py                  # YAML config: thresholds, overrides, suppressions, environments
-│   ├── models/schemas.py          # Data models (ResourceChange, RuleFinding, RiskReport)
+│   ├── policy/engine.py           # Policy-as-Code engine (12 condition types)
+│   ├── models/schemas.py          # Data models (ResourceChange, RuleFinding, RiskReport, ScoreBreakdown)
 │   ├── output/
 │   │   ├── sarif.py               # SARIF v2.1.0 (GitHub Security tab)
 │   │   ├── markdown.py            # Markdown (PR comments)
 │   │   └── junit.py               # JUnit XML (CI reporting)
-│   ├── parser/cloudformation.py   # CFn parser with intrinsic function support
+│   ├── parser/
+│   │   ├── cloudformation.py      # CloudFormation parser with intrinsic functions
+│   │   ├── terraform.py           # Terraform plan JSON parser
+│   │   └── changeset.py           # AWS ChangeSet parser
 │   ├── rules/
 │   │   ├── base.py                # Rule ABC and RuleEngine
 │   │   ├── iam.py                 # IAM-001 – IAM-005
@@ -851,11 +1009,15 @@ production-change-risk-analyzer/
 │   └── web/
 │       ├── app.py                 # FastAPI application
 │       └── templates/             # Jinja2 (dashboard, analyze, report)
-├── tests/                         # 150+ tests
+├── tests/                         # 289 tests
 │   ├── test_rules/                # Unit tests for all 27 rules
-│   ├── test_analyzer/             # Orchestrator integration tests
+│   ├── test_analyzer/             # Orchestrator, scoring, blast radius, rollback tests
 │   ├── test_output/               # SARIF, Markdown output tests
 │   ├── test_config.py             # Config loading, overrides, suppressions
+│   ├── test_config_integration.py # Config wired into orchestrator e2e
+│   ├── test_terraform.py          # Terraform plan parsing tests
+│   ├── test_changeset.py          # AWS ChangeSet parsing tests
+│   ├── test_policy.py             # Policy-as-Code engine tests
 │   ├── test_web/                  # FastAPI endpoint tests
 │   ├── test_storage/              # DynamoDB, S3 tests (moto)
 │   └── test_notifications/        # SNS notification tests (moto)

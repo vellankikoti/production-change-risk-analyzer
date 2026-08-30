@@ -1,0 +1,80 @@
+# Production Change Risk Analyzer — Policy-as-Code
+#
+# Policies override the deterministic risk decision.
+# If a policy matches, its decision takes effect.
+# When multiple policies match, the most restrictive decision wins.
+#
+# Usage:
+#   python cli.py analyze --after template.yaml --policies policies.yaml --no-ai
+#
+# Condition reference:
+#   environment:      Match by environment name (string or list)
+#   resource_type:    Match by AWS resource type (string or list)
+#   change_type:      Match by change action: CREATE, MODIFY, DELETE (string or list)
+#   rules_triggered:  Match if any of these rule IDs fired (list)
+#   severity_max:     Match if highest severity is at or below this level
+#   risk_score_min:   Match if risk score >= this value
+#   risk_score_max:   Match if risk score <= this value
+#   finding_count_min: Match if finding count >= this value
+#   resource_id:      Match resource IDs by glob pattern (string or list)
+#   after:            Match if analysis timestamp >= this ISO date (change freeze start)
+#   before:           Match if analysis timestamp < this ISO date (change freeze end)
+
+policies:
+  # Block production database deletion
+  - id: PROD-DB-001
+    name: "Block production database deletion"
+    when:
+      environment: production
+      resource_type: "AWS::RDS::DBInstance"
+      change_type: DELETE
+    decision: BLOCK
+    reason: "Production database deletion requires CAB approval"
+
+  # Block public network access in production
+  - id: PROD-SG-001
+    name: "Block public access in production"
+    when:
+      environment: production
+      rules_triggered:
+        - SG-001
+        - SG-004
+    decision: BLOCK
+    reason: "Public network access is prohibited in production"
+
+  # Allow broader access in development
+  - id: DEV-ALLOW-001
+    name: "Allow broad access in development"
+    when:
+      environment: development
+      severity_max: HIGH
+    decision: APPROVE
+    reason: "Development environment allows higher risk tolerance"
+
+  # Holiday change freeze
+  # - id: FREEZE-001
+  #   name: "Holiday change freeze"
+  #   when:
+  #     environment: production
+  #     after: "2026-12-20T00:00:00Z"
+  #     before: "2027-01-02T00:00:00Z"
+  #   decision: BLOCK
+  #   reason: "Holiday change freeze in effect — no production deployments"
+
+  # Block any change that triggers 5+ findings
+  - id: HIGH-FINDING-001
+    name: "Block high finding count"
+    when:
+      environment: production
+      finding_count_min: 5
+    decision: BLOCK
+    reason: "Too many findings — requires security review before deployment"
+
+  # Block IAM admin access everywhere
+  - id: IAM-ADMIN-001
+    name: "Block IAM admin access"
+    when:
+      rules_triggered:
+        - IAM-003
+    decision: BLOCK
+    reason: "IAM admin access (Action:* Resource:*) is prohibited in all environments"

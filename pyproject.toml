@@ -1,8 +1,22 @@
 [project]
-name = "production-change-risk-analyzer"
-version = "0.1.0"
-description = "AI-assisted infrastructure change risk analysis system"
+name = "change-risk-analyzer"
+version = "1.0.0"
+description = "Evidence-based infrastructure change risk analysis. Deterministic rules detect risks; AI explains."
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [{name = "Vellankikoti"}]
+keywords = ["aws", "cloudformation", "terraform", "risk-analysis", "security", "devops", "sre", "infrastructure"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "boto3>=1.35.0",
     "pyyaml>=6.0",
@@ -23,6 +37,22 @@ dev = [
 
 [project.scripts]
 risk-analyzer = "cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/vellankikoti/production-change-risk-analyzer"
+Repository = "https://github.com/vellankikoti/production-change-risk-analyzer"
+Issues = "https://github.com/vellankikoti/production-change-risk-analyzer/issues"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli", "web_server"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

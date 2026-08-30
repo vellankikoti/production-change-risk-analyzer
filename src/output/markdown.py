@@ -75,6 +75,41 @@ def generate_markdown(report: RiskReport) -> str:
             lines.append(f"| `{f.rule_id}` | {_sev(sev)} | `{f.resource}` | {finding_text} | {compliance_str} |")
         lines.append("")
 
+    if report.score_breakdown and report.score_breakdown.contributions:
+        sb = report.score_breakdown
+        lines.append("### Score Breakdown")
+        lines.append("")
+        lines.append("| Category | Score | Top Finding |")
+        lines.append("|----------|------:|-------------|")
+        for c in sb.contributions:
+            top = c.findings[0] if c.findings else ""
+            if len(top) > 70:
+                top = top[:67] + "..."
+            lines.append(f"| {c.category} | **+{c.score}** | {top} |")
+        lines.append(f"| **Total** | **{sb.total_score}/100** | **{sb.decision}** |")
+        lines.append("")
+
+    if report.blast_radius and report.blast_radius.total_affected > 0:
+        br = report.blast_radius
+        lines.append(f"### Blast Radius: {br.severity} ({br.total_affected} resources)")
+        lines.append("")
+        if br.directly_affected:
+            lines.append(f"**Directly affected:** {', '.join(f'`{r}`' for r in br.directly_affected)}")
+            lines.append("")
+        if br.transitively_affected:
+            lines.append(f"**Transitively affected:** {', '.join(f'`{r}`' for r in br.transitively_affected)}")
+            lines.append("")
+
+    if report.rollback_risk and report.rollback_risk.resource_risks:
+        rb = report.rollback_risk
+        lines.append(f"### Rollback Risk: {rb.overall_risk}")
+        lines.append("")
+        lines.append("| Resource | Change | Risk | Reason |")
+        lines.append("|----------|--------|------|--------|")
+        for r in rb.resource_risks:
+            lines.append(f"| `{r.resource_id}` | {r.change_type} | **{r.rollback_risk}** | {r.reason} |")
+        lines.append("")
+
     ai = report.ai_analysis
     if ai.explanation:
         lines.append("### AI Analysis")

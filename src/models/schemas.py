@@ -169,6 +169,147 @@ class AIAnalysis:
 
 
 @dataclass
+class ScoreContribution:
+    category: str
+    score: int
+    findings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.category,
+            "score": self.score,
+            "findings": self.findings,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ScoreContribution:
+        return cls(
+            category=data["category"],
+            score=data["score"],
+            findings=data.get("findings", []),
+        )
+
+
+@dataclass
+class ScoreBreakdown:
+    contributions: list[ScoreContribution] = field(default_factory=list)
+    total_score: int = 0
+    decision: str = ""
+    explanation: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contributions": [c.to_dict() for c in self.contributions],
+            "total_score": self.total_score,
+            "decision": self.decision,
+            "explanation": self.explanation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ScoreBreakdown:
+        return cls(
+            contributions=[ScoreContribution.from_dict(c) for c in data.get("contributions", [])],
+            total_score=data.get("total_score", 0),
+            decision=data.get("decision", ""),
+            explanation=data.get("explanation", ""),
+        )
+
+
+@dataclass
+class DependencyEdge:
+    source: str
+    target: str
+    edge_type: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"source": self.source, "target": self.target, "edge_type": self.edge_type}
+
+
+@dataclass
+class BlastRadius:
+    changed_resources: list[str] = field(default_factory=list)
+    directly_affected: list[str] = field(default_factory=list)
+    transitively_affected: list[str] = field(default_factory=list)
+    total_affected: int = 0
+    severity: str = "LOW"
+    graph: dict[str, list[str]] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "changed_resources": self.changed_resources,
+            "directly_affected": self.directly_affected,
+            "transitively_affected": self.transitively_affected,
+            "total_affected": self.total_affected,
+            "severity": self.severity,
+            "graph": self.graph,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BlastRadius:
+        return cls(
+            changed_resources=data.get("changed_resources", []),
+            directly_affected=data.get("directly_affected", []),
+            transitively_affected=data.get("transitively_affected", []),
+            total_affected=data.get("total_affected", 0),
+            severity=data.get("severity", "LOW"),
+            graph=data.get("graph", {}),
+        )
+
+
+@dataclass
+class ResourceRollbackRisk:
+    resource_id: str
+    resource_type: str
+    change_type: str
+    rollback_risk: str
+    reason: str
+    may_require_replacement: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "resource_id": self.resource_id,
+            "resource_type": self.resource_type,
+            "change_type": self.change_type,
+            "rollback_risk": self.rollback_risk,
+            "reason": self.reason,
+            "may_require_replacement": self.may_require_replacement,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ResourceRollbackRisk:
+        return cls(
+            resource_id=data["resource_id"],
+            resource_type=data["resource_type"],
+            change_type=data["change_type"],
+            rollback_risk=data["rollback_risk"],
+            reason=data["reason"],
+            may_require_replacement=data.get("may_require_replacement", False),
+        )
+
+
+@dataclass
+class RollbackAssessment:
+    overall_risk: str = "LOW"
+    resource_risks: list[ResourceRollbackRisk] = field(default_factory=list)
+    explanation: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "overall_risk": self.overall_risk,
+            "resource_risks": [r.to_dict() for r in self.resource_risks],
+            "explanation": self.explanation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RollbackAssessment:
+        return cls(
+            overall_risk=data.get("overall_risk", "LOW"),
+            resource_risks=[ResourceRollbackRisk.from_dict(r) for r in data.get("resource_risks", [])],
+            explanation=data.get("explanation", ""),
+        )
+
+
+@dataclass
 class RiskReport:
     change_id: str
     timestamp: str
@@ -178,9 +319,13 @@ class RiskReport:
     evidence: EvidencePackage
     ai_analysis: AIAnalysis
     reasons: list[str] = field(default_factory=list)
+    score_breakdown: ScoreBreakdown | None = None
+    blast_radius: BlastRadius | None = None
+    rollback_risk: RollbackAssessment | None = None
+    policy_results: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "change_id": self.change_id,
             "timestamp": self.timestamp,
             "risk_level": self.risk_level.value if isinstance(self.risk_level, RiskLevel) else self.risk_level,
@@ -190,10 +335,19 @@ class RiskReport:
             "ai_analysis": self.ai_analysis.to_dict(),
             "reasons": self.reasons,
         }
+        if self.score_breakdown:
+            d["score_breakdown"] = self.score_breakdown.to_dict()
+        if self.blast_radius:
+            d["blast_radius"] = self.blast_radius.to_dict()
+        if self.rollback_risk:
+            d["rollback_risk"] = self.rollback_risk.to_dict()
+        if self.policy_results:
+            d["policy_results"] = self.policy_results
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RiskReport:
-        return cls(
+        report = cls(
             change_id=data["change_id"],
             timestamp=data["timestamp"],
             risk_level=RiskLevel(data["risk_level"]),
@@ -203,3 +357,12 @@ class RiskReport:
             ai_analysis=AIAnalysis.from_dict(data["ai_analysis"]),
             reasons=data.get("reasons", []),
         )
+        if "score_breakdown" in data:
+            report.score_breakdown = ScoreBreakdown.from_dict(data["score_breakdown"])
+        if "blast_radius" in data:
+            report.blast_radius = BlastRadius.from_dict(data["blast_radius"])
+        if "rollback_risk" in data:
+            report.rollback_risk = RollbackAssessment.from_dict(data["rollback_risk"])
+        if "policy_results" in data:
+            report.policy_results = data["policy_results"]
+        return report

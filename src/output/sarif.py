@@ -100,6 +100,23 @@ def generate_sarif(report: RiskReport) -> dict[str, Any]:
                     "decision": decision,
                     "environment": report.evidence.environment,
                     "timestamp": report.timestamp,
+                    **({"scoreBreakdown": {
+                        "contributions": [
+                            {"category": c.category, "score": c.score}
+                            for c in report.score_breakdown.contributions
+                        ],
+                        "totalScore": report.score_breakdown.total_score,
+                    }} if report.score_breakdown else {}),
+                    **({"blastRadius": {
+                        "totalAffected": report.blast_radius.total_affected,
+                        "severity": report.blast_radius.severity,
+                        "directlyAffected": report.blast_radius.directly_affected,
+                        "transitivelyAffected": report.blast_radius.transitively_affected,
+                    }} if report.blast_radius else {}),
+                    **({"rollbackRisk": {
+                        "overallRisk": report.rollback_risk.overall_risk,
+                        "resourceCount": len(report.rollback_risk.resource_risks),
+                    }} if report.rollback_risk else {}),
                 },
             }
         ],

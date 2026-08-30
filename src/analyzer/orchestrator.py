@@ -6,6 +6,9 @@ import uuid
 from datetime import datetime, timezone
 
 from src.ai.bedrock_analyzer import BedrockAnalyzer
+from src.analyzer.blast_radius import compute_blast_radius
+from src.analyzer.rollback import assess_rollback
+from src.analyzer.scoring import compute_score_breakdown
 from src.config import RiskAnalyzerConfig, load_config
 
 logger = logging.getLogger(__name__)
@@ -18,7 +21,9 @@ from src.models.schemas import (
     RuleFinding,
     Severity,
 )
+from src.parser.changeset import is_changeset, parse_changeset
 from src.parser.cloudformation import diff_templates, parse_single_template, parse_template
+from src.parser.terraform import is_terraform_plan, parse_terraform_plan
 from src.rules.availability import get_all_availability_rules
 from src.rules.base import RuleEngine
 from src.rules.data import get_all_data_rules
@@ -100,20 +105,45 @@ class ChangeAnalyzer:
             except Exception:
                 logger.debug("CloudWatch metrics unavailable — skipping")
 
+    def _parse_source(
+        self,
+        after_template: str,
+        before_template: str | None,
+        source: str,
+    ) -> tuple[list, dict, dict | None]:
+        """Route to the right parser based on source type. Returns (changes, metadata, parsed_template_or_None)."""
+        metadata: dict = {}
+        parsed_template = None
+
+        if source == "terraform" or (source == "auto" and is_terraform_plan(after_template)):
+            changes = parse_terraform_plan(after_template)
+            metadata["source"] = "terraform"
+        elif source == "changeset" or (source == "auto" and is_changeset(after_template)):
+            changes, cs_meta = parse_changeset(after_template)
+            metadata["source"] = "changeset"
+            metadata.update(cs_meta)
+        else:
+            parsed_template = parse_template(after_template)
+            if before_template:
+                before_parsed = parse_template(before_template)
+                changes = diff_templates(before_parsed, parsed_template)
+            else:
+                changes = parse_single_template(parsed_template)
+            metadata["source"] = "cloudformation"
+            metadata["has_before"] = before_template is not None
+
+        metadata["total_resources"] = len(changes)
+        return changes, metadata, parsed_template
+
     def analyze(
         self,
         after_template: str,
         before_template: str | None = None,
         environment: str = "development",
+        source: str = "auto",
     ) -> RiskReport:
         start_time = time.monotonic()
-        after_parsed = parse_template(after_template)
-
-        if before_template:
-            before_parsed = parse_template(before_template)
-            changes = diff_templates(before_parsed, after_parsed)
-        else:
-            changes = parse_single_template(after_parsed)
+        changes, source_metadata, parsed_template = self._parse_source(after_template, before_template, source)
 
         all_findings = self.engine.evaluate(changes)
 
@@ -151,7 +181,7 @@ class ChangeAnalyzer:
             environment=environment,
             changes=changes,
             findings=findings,
-            metadata={"has_before": before_template is not None, "total_resources": len(changes)},
+            metadata=source_metadata,
         )
 
         risk_level, risk_score, decision, reasons = _compute_risk(
@@ -164,6 +194,13 @@ class ChangeAnalyzer:
         else:
             ai_analysis = AIAnalysis.empty()
 
+        dec_str = decision.value if isinstance(decision, Decision) else decision
+        score_breakdown = compute_score_breakdown(findings, dec_str)
+
+        blast_radius = compute_blast_radius(parsed_template, changes) if parsed_template else None
+
+        rollback = assess_rollback(changes)
+
         report = RiskReport(
             change_id=evidence.change_id,
             timestamp=evidence.timestamp,
@@ -173,6 +210,9 @@ class ChangeAnalyzer:
             evidence=evidence,
             ai_analysis=ai_analysis,
             reasons=reasons,
+            score_breakdown=score_breakdown,
+            blast_radius=blast_radius,
+            rollback_risk=rollback,
         )
 
         duration_ms = (time.monotonic() - start_time) * 1000

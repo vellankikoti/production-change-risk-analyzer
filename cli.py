@@ -58,6 +58,8 @@ def cli() -> None:
 @click.option("--format", "output_format", type=click.Choice(["rich", "json", "sarif", "markdown", "junit"]), default="rich", help="Output format")
 @click.option("--output-file", type=click.Path(), default=None, help="Write output to file instead of stdout")
 @click.option("--config", "config_path", type=click.Path(), default=None, help="Path to risk-analyzer.yaml config file")
+@click.option("--source", type=click.Choice(["auto", "cloudformation", "terraform", "changeset"]), default="auto", help="Input source type (auto-detected by default)")
+@click.option("--policies", "policies_path", type=click.Path(exists=True), default=None, help="Path to policies YAML for policy-as-code evaluation")
 def analyze(
     before: str | None,
     after: str,
@@ -70,8 +72,15 @@ def analyze(
     output_format: str,
     output_file: str | None,
     config_path: str | None,
+    source: str,
+    policies_path: str | None,
 ) -> None:
-    """Analyze an infrastructure change for risks."""
+    """Analyze an infrastructure change for risks.
+
+    Supports CloudFormation templates (YAML/JSON), Terraform plan JSON
+    (output of 'terraform show -json'), and AWS CloudFormation ChangeSets.
+    Source type is auto-detected by default.
+    """
     after_template = _read_file(after)
     before_template = _read_file(before) if before else None
 
@@ -89,7 +98,25 @@ def analyze(
             after_template=after_template,
             before_template=before_template,
             environment=environment,
+            source=source,
         )
+
+    if policies_path:
+        from src.policy.engine import PolicyEngine, PolicyContext
+        policy_engine = PolicyEngine.from_yaml(policies_path)
+        policy_ctx = PolicyContext.from_report(report, environment=environment)
+        policy_results = policy_engine.evaluate(policy_ctx)
+        new_decision, policy_results = policy_engine.apply_decision(
+            policy_results,
+            report.decision.value if hasattr(report.decision, "value") else report.decision,
+        )
+        report.policy_results = [r.to_dict() for r in policy_results if r.matched]
+        if new_decision != (report.decision.value if hasattr(report.decision, "value") else report.decision):
+            from src.models.schemas import Decision as _Decision
+            report.decision = _Decision(new_decision)
+            matched_policies = [r for r in policy_results if r.matched]
+            if matched_policies:
+                console.print(f"[yellow]Policy override: {matched_policies[0].policy_name} — {matched_policies[0].reason}[/yellow]")
 
     _emit_output(report, output_format, output_file)
 
@@ -238,6 +265,60 @@ def _print_report(report) -> None:
                 f"[{RISK_COLORS.get(sev, '')}]{sev}[/]",
                 f.resource,
                 f.finding[:80],
+            )
+        console.print(table)
+
+    if report.score_breakdown and report.score_breakdown.contributions:
+        sb = report.score_breakdown
+        table = Table(title="Score Breakdown")
+        table.add_column("Category", style="cyan")
+        table.add_column("Score", justify="right")
+        table.add_column("Bar")
+        table.add_column("Top Findings")
+        for c in sb.contributions:
+            bar_len = min(c.score, 30)
+            bar = "█" * bar_len
+            color = "red" if c.score >= 25 else "yellow" if c.score >= 15 else "green"
+            top = c.findings[0][:60] if c.findings else ""
+            if len(c.findings) > 1:
+                top += f" (+{len(c.findings) - 1} more)"
+            table.add_row(c.category, str(c.score), f"[{color}]{bar}[/]", top)
+        table.add_row("", "", "", "", end_section=True)
+        table.add_row("[bold]Total[/]", f"[bold]{sb.total_score}/100[/]", "", f"[bold]{sb.decision}[/]")
+        console.print(table)
+
+    if report.blast_radius and report.blast_radius.total_affected > 0:
+        br = report.blast_radius
+        br_color = RISK_COLORS.get(br.severity, "")
+        lines = [f"[{br_color}]{br.severity}[/] — {br.total_affected} resources affected"]
+        for rid in br.changed_resources:
+            deps = br.graph.get(rid, [])
+            if deps:
+                lines.append(f"  {rid} (changed)")
+                for d in deps[:5]:
+                    marker = "├──" if d != deps[-1] else "└──"
+                    lines.append(f"    {marker} {d}")
+                if len(deps) > 5:
+                    lines.append(f"    └── ...and {len(deps) - 5} more")
+            else:
+                lines.append(f"  {rid} (changed, no dependents)")
+        console.print(Panel("\n".join(lines), title="Blast Radius"))
+
+    if report.rollback_risk and report.rollback_risk.resource_risks:
+        rb = report.rollback_risk
+        rb_color = RISK_COLORS.get(rb.overall_risk, "")
+        table = Table(title=f"Rollback Risk: [{rb_color}]{rb.overall_risk}[/]")
+        table.add_column("Resource", style="cyan")
+        table.add_column("Change")
+        table.add_column("Risk")
+        table.add_column("Reason")
+        for r in rb.resource_risks:
+            r_color = RISK_COLORS.get(r.rollback_risk, "")
+            table.add_row(
+                r.resource_id,
+                r.change_type,
+                f"[{r_color}]{r.rollback_risk}[/]",
+                r.reason[:60],
             )
         console.print(table)
 

@@ -1,0 +1,143 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.7.0",
+  "planned_values": {},
+  "resource_changes": [
+    {
+      "address": "aws_security_group.database",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "database",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "description": "Database security group - DANGEROUS",
+          "vpc_id": "vpc-12345678",
+          "ingress": [
+            {
+              "from_port": 5432,
+              "to_port": 5432,
+              "protocol": "tcp",
+              "cidr_blocks": ["0.0.0.0/0"],
+              "ipv6_cidr_blocks": [],
+              "self": false,
+              "description": "PostgreSQL from anywhere"
+            }
+          ],
+          "egress": []
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_security_group.all_traffic",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "all_traffic",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "description": "All traffic open",
+          "vpc_id": "vpc-12345678",
+          "ingress": [
+            {
+              "from_port": 0,
+              "to_port": 0,
+              "protocol": "-1",
+              "cidr_blocks": ["0.0.0.0/0"],
+              "ipv6_cidr_blocks": [],
+              "self": false,
+              "description": "All traffic"
+            }
+          ],
+          "egress": []
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_iam_role.admin",
+      "mode": "managed",
+      "type": "aws_iam_role",
+      "name": "admin",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "admin-role",
+          "assume_role_policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}",
+          "inline_policy": [
+            {
+              "name": "admin-policy",
+              "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}"
+            }
+          ]
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_db_instance.main",
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "engine": "postgres",
+          "engine_version": "15.4",
+          "instance_class": "db.r5.large",
+          "username": "admin",
+          "multi_az": false,
+          "backup_retention_period": 0,
+          "storage_encrypted": false,
+          "publicly_accessible": true,
+          "deletion_protection": false,
+          "allocated_storage": 100
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_s3_bucket.data",
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "data",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "bucket": "my-data-bucket"
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_ebs_volume.data",
+      "mode": "managed",
+      "type": "aws_ebs_volume",
+      "name": "data",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "availability_zone": "us-east-1a",
+          "size": 100,
+          "type": "gp3",
+          "encrypted": false
+        },
+        "after_unknown": {}
+      }
+    }
+  ],
+  "configuration": {}
+}

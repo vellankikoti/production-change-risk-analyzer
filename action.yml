@@ -1,0 +1,176 @@
+name: 'Production Change Risk Analyzer'
+description: 'Analyze infrastructure changes for security, availability, and compliance risks before deployment'
+author: 'vellankikoti'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  after:
+    description: 'Path to the proposed template (required)'
+    required: true
+  before:
+    description: 'Path to the current template (optional — for before/after comparison)'
+    required: false
+    default: ''
+  environment:
+    description: 'Target environment (production, staging, development)'
+    required: false
+    default: 'production'
+  format:
+    description: 'Output format (rich, json, sarif, markdown, junit)'
+    required: false
+    default: 'sarif'
+  config:
+    description: 'Path to risk-analyzer.yaml config file'
+    required: false
+    default: ''
+  policies:
+    description: 'Path to policies YAML file for policy-as-code evaluation'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Fail the action on this decision or higher (block, review, any)'
+    required: false
+    default: 'block'
+  no-ai:
+    description: 'Skip AI analysis (deterministic only)'
+    required: false
+    default: 'true'
+
+outputs:
+  decision:
+    description: 'The risk decision (APPROVE, REVIEW, or BLOCK)'
+    value: ${{ steps.analyze.outputs.decision }}
+  risk-level:
+    description: 'The risk level (LOW, MEDIUM, HIGH, CRITICAL)'
+    value: ${{ steps.analyze.outputs.risk-level }}
+  risk-score:
+    description: 'The numeric risk score (0-100)'
+    value: ${{ steps.analyze.outputs.risk-score }}
+  finding-count:
+    description: 'Number of findings detected'
+    value: ${{ steps.analyze.outputs.finding-count }}
+  report-file:
+    description: 'Path to the generated report file'
+    value: ${{ steps.analyze.outputs.report-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install risk analyzer
+      shell: bash
+      run: |
+        pip install uv
+        cd ${{ github.action_path }}
+        uv venv .venv
+        source .venv/bin/activate
+        uv pip install -r requirements.txt
+
+    - name: Run analysis
+      id: analyze
+      shell: bash
+      env:
+        INPUT_AFTER: ${{ inputs.after }}
+        INPUT_BEFORE: ${{ inputs.before }}
+        INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_POLICIES: ${{ inputs.policies }}
+        INPUT_NO_AI: ${{ inputs.no-ai }}
+      run: |
+        cd ${{ github.action_path }}
+        source .venv/bin/activate
+
+        ARGS="--after $INPUT_AFTER"
+
+        if [ -n "$INPUT_BEFORE" ]; then
+          ARGS="$ARGS --before $INPUT_BEFORE"
+        fi
+
+        ARGS="$ARGS --environment $INPUT_ENVIRONMENT"
+
+        if [ "$INPUT_NO_AI" = "true" ]; then
+          ARGS="$ARGS --no-ai"
+        fi
+
+        if [ -n "$INPUT_CONFIG" ]; then
+          ARGS="$ARGS --config $INPUT_CONFIG"
+        fi
+
+        if [ -n "$INPUT_POLICIES" ]; then
+          ARGS="$ARGS --policies $INPUT_POLICIES"
+        fi
+
+        # Determine report file extension
+        case "$INPUT_FORMAT" in
+          sarif)  EXT="sarif" ;;
+          junit)  EXT="xml" ;;
+          markdown) EXT="md" ;;
+          *)      EXT="json" ;;
+        esac
+        REPORT_FILE="${{ runner.temp }}/risk-report.${EXT}"
+
+        # Generate formatted report
+        python cli.py analyze $ARGS \
+          --format "$INPUT_FORMAT" \
+          --output-file "$REPORT_FILE" || true
+
+        # Get decision from JSON output
+        RESULT=$(python cli.py analyze $ARGS --format json 2>/dev/null || echo '{"decision":"ERROR","risk_level":"ERROR","risk_score":0,"evidence":{"findings":[]}}')
+
+        DECISION=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['decision'])")
+        RISK_LEVEL=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['risk_level'])")
+        RISK_SCORE=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['risk_score'])")
+        FINDING_COUNT=$(echo "$RESULT" | python -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('evidence',{}).get('findings',[])))")
+
+        echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+        echo "risk-level=$RISK_LEVEL" >> "$GITHUB_OUTPUT"
+        echo "risk-score=$RISK_SCORE" >> "$GITHUB_OUTPUT"
+        echo "finding-count=$FINDING_COUNT" >> "$GITHUB_OUTPUT"
+        echo "report-file=$REPORT_FILE" >> "$GITHUB_OUTPUT"
+
+        # Job summary
+        {
+          echo "## Risk Analysis Result"
+          echo ""
+          echo "| Metric | Value |"
+          echo "|:-------|:------|"
+          echo "| Decision | **$DECISION** |"
+          echo "| Risk Level | $RISK_LEVEL |"
+          echo "| Risk Score | $RISK_SCORE/100 |"
+          echo "| Findings | $FINDING_COUNT |"
+          echo "| Environment | $INPUT_ENVIRONMENT |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # Annotations
+        if [ "$DECISION" = "BLOCK" ]; then
+          echo "::error::Risk Analysis: BLOCK (score: $RISK_SCORE, $FINDING_COUNT findings)"
+        elif [ "$DECISION" = "REVIEW" ]; then
+          echo "::warning::Risk Analysis: REVIEW (score: $RISK_SCORE, $FINDING_COUNT findings)"
+        else
+          echo "::notice::Risk Analysis: APPROVE (score: $RISK_SCORE, $FINDING_COUNT findings)"
+        fi
+
+    - name: Gate decision
+      shell: bash
+      env:
+        DECISION: ${{ steps.analyze.outputs.decision }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        if [ "$FAIL_ON" = "any" ] && [ "$DECISION" != "APPROVE" ]; then
+          echo "::error::Change risk analysis: $DECISION — failing because fail-on=$FAIL_ON"
+          exit 1
+        elif [ "$FAIL_ON" = "review" ] && [ "$DECISION" != "APPROVE" ]; then
+          echo "::error::Change risk analysis: $DECISION — failing because fail-on=$FAIL_ON"
+          exit 1
+        elif [ "$FAIL_ON" = "block" ] && [ "$DECISION" = "BLOCK" ]; then
+          echo "::error::Change risk analysis: BLOCK — deployment blocked"
+          exit 1
+        fi
