@@ -8,58 +8,134 @@
 
 ---
 
-## Why This Exists
+## The Problem
 
-Production deployments fail because teams deploy CloudFormation changes without understanding the risk surface. Security groups open to the world, IAM policies granting admin access, Multi-AZ silently disabled, encryption missing, logging deleted — these patterns are detectable before deployment, not after an incident.
+Production deployments fail because teams push CloudFormation changes without understanding the risk surface:
+- Security groups silently open to `0.0.0.0/0`
+- IAM policies granting `Action: "*", Resource: "*"`
+- Multi-AZ disabled on production RDS
+- Encryption missing from S3/RDS/EBS
+- CloudTrail logging deleted
+- Backup retention set to 0 days
 
-This tool catches them with deterministic rules (no AI guesswork), maps findings to compliance frameworks (CIS, SecurityHub, Well-Architected), and integrates into your CI/CD pipeline to block dangerous changes before they reach production.
+These patterns are **detectable before deployment**, not after an incident.
 
-**What makes this different:**
-- **Deterministic decisions.** BLOCK/REVIEW/APPROVE is based on rule severity thresholds — never AI. The AI only explains what the rules found.
-- **FACT vs INFERENCE separation.** AI output explicitly labels what is directly observable (FACT) vs what is inferred (INFERENCE). No hallucinated risks.
-- **Compliance-mapped.** Every rule traces to CIS AWS Foundations Benchmark, AWS Security Hub controls, AWS Config rules, and Well-Architected Framework pillars.
-- **Works without AWS.** Run `--no-ai` for fully local, deterministic analysis — no credentials needed.
+## What Makes This Different
+
+| Feature | This Tool | Typical IaC Scanners |
+|:--------|:----------|:--------------------|
+| Decision model | Deterministic thresholds (never AI) | AI/ML black box or simple pass/fail |
+| AI role | Explains findings with FACT/INFERENCE separation | N/A or unstructured |
+| Compliance | Every rule mapped to CIS, SecurityHub, Config, Well-Architected | Partial or manual |
+| Before/after diff | Compares current vs proposed templates | Scans proposed only |
+| Output formats | Rich, JSON, SARIF, Markdown, JUnit | Usually one or two |
+| Configuration | Per-environment thresholds, suppressions with expiry | Global on/off |
+| AWS dependency | Optional — works fully offline with `--no-ai` | Usually required |
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
-│  CloudFormation      │     │  27 Deterministic     │     │  Evidence Package    │
-│  Template (YAML/JSON)│────▶│  Rules Engine         │────▶│  (findings + context)│
-│  Before + After      │     │  7 categories         │     │                     │
-└─────────────────────┘     └──────────────────────┘     └────────┬────────────┘
-                                                                   │
-                              ┌─────────────────────┐              │
-                              │  Risk Score          │◀─────── Deterministic
-                              │  (threshold-based)   │         Thresholds
-                              │  BLOCK/REVIEW/APPROVE│              │
-                              └─────────────────────┘              │
-                                                                   ▼
-                              ┌─────────────────────┐     ┌─────────────────────┐
-                              │  Risk Report         │◀────│  AI Explanation      │
-                              │  (5 output formats)  │     │  (FACT vs INFERENCE) │
-                              └─────────────────────┘     │  amazon.nova-lite    │
-                                                          └─────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Input
+        A[CloudFormation Template<br/>Before + After YAML/JSON]
+    end
+
+    subgraph Parser
+        B[CloudFormation Parser<br/>Intrinsic function support<br/>Resource-by-resource diff]
+    end
+
+    subgraph Rules["Deterministic Rules Engine (27 rules)"]
+        direction LR
+        R1[IAM<br/>5 rules]
+        R2[Security Groups<br/>4 rules]
+        R3[Network<br/>4 rules]
+        R4[Availability<br/>5 rules]
+        R5[Encryption<br/>3 rules]
+        R6[Logging<br/>3 rules]
+        R7[Data Protection<br/>3 rules]
+    end
+
+    subgraph Scoring["Risk Scoring (Deterministic)"]
+        S1[Highest severity wins]
+        S2[Score = base + count * 5]
+        S3["BLOCK ≥80 | REVIEW 40-79 | APPROVE <40"]
+    end
+
+    subgraph AI["AI Explanation Layer (Optional)"]
+        AI1[Amazon Bedrock<br/>Nova Lite v1]
+        AI2[FACT vs INFERENCE<br/>separation enforced]
+        AI3[Blast radius<br/>Remediation<br/>Operational impact]
+    end
+
+    subgraph Output["Output (5 formats)"]
+        O1[Rich Terminal]
+        O2[JSON]
+        O3[SARIF v2.1.0]
+        O4[Markdown]
+        O5[JUnit XML]
+    end
+
+    A --> B --> Rules --> Scoring --> Output
+    Rules -->|Evidence Package| AI --> Output
+
+    style Rules fill:#1a1a2e,color:#fff
+    style Scoring fill:#16213e,color:#fff
+    style AI fill:#0f3460,color:#fff
 ```
 
-**The AI layer is advisory only.** If Bedrock is unavailable, throttled, or disabled (`--no-ai`), you still get a complete risk report with all findings, scores, and decisions. AI adds explanation, blast radius assessment, operational impact, and remediation — but never changes the verdict.
+### Decision Flow
+
+```mermaid
+flowchart LR
+    F[Findings] --> C{Any CRITICAL?}
+    C -->|Yes| BLOCK[BLOCK<br/>Score 80-100]
+    C -->|No| H{Any HIGH?}
+    H -->|Yes| BOH{block_on_high?}
+    BOH -->|Yes| BLOCK2[BLOCK]
+    BOH -->|No| REVIEW[REVIEW<br/>Score 60-79]
+    H -->|No| M{Any MEDIUM?}
+    M -->|Yes| REVIEW2[REVIEW<br/>Score 40-59]
+    M -->|No| APPROVE[APPROVE<br/>Score 0-39]
+
+    style BLOCK fill:#dc3545,color:#fff
+    style BLOCK2 fill:#dc3545,color:#fff
+    style REVIEW fill:#ffc107,color:#000
+    style REVIEW2 fill:#ffc107,color:#000
+    style APPROVE fill:#28a745,color:#fff
+```
+
+### CI/CD Integration Flow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GH as GitHub PR
+    participant RA as Risk Analyzer
+    participant ST as Security Tab
+    participant PR as PR Comment
+
+    Dev->>GH: Push CFn changes
+    GH->>RA: Trigger on PR (path filter)
+    RA->>RA: Detect changed templates
+    RA->>RA: Run 27 deterministic rules
+    RA->>ST: Upload SARIF findings
+    RA->>PR: Post Markdown report
+    alt Decision = BLOCK
+        RA->>GH: Exit 1 (fail check)
+        GH->>Dev: PR blocked
+    else Decision = APPROVE/REVIEW
+        RA->>GH: Exit 0 (pass)
+        GH->>Dev: PR passes
+    end
+```
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
-
-For AI analysis (optional):
-- AWS CLI configured with credentials
-- Amazon Bedrock access to `amazon.nova-lite-v1:0`
-
-### Step 1: Install
+### Step 1: Install (2 minutes)
 
 ```bash
 git clone https://github.com/vellankikoti/production-change-risk-analyzer.git
@@ -74,196 +150,247 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 2: Analyze a template
+### Step 2: Analyze your first template (30 seconds)
 
 ```bash
-# Analyze a new stack (no AI — works without AWS credentials)
-python cli.py analyze --after tests/fixtures/templates/dangerous_changes.yaml --no-ai
+# No AWS credentials needed — fully deterministic
+python cli.py analyze \
+  --after tests/fixtures/templates/dangerous_changes.yaml \
+  --no-ai
 
-# Compare before/after changes in production
+# Compare before vs after
 python cli.py analyze \
   --before tests/fixtures/templates/secure_baseline.yaml \
   --after tests/fixtures/templates/dangerous_changes.yaml \
-  --environment production
+  --environment production \
+  --no-ai
+```
 
-# With AI explanation (requires AWS credentials + Bedrock access)
+**Expected output:** CRITICAL / BLOCK with findings for IAM admin access, all-traffic security group, reduced ASG capacity, disabled Multi-AZ, and removed backups.
+
+### Step 3: Enable AI explanation (optional)
+
+```bash
+# Requires: AWS CLI configured + Bedrock access to amazon.nova-lite-v1:0
 python cli.py analyze \
   --before tests/fixtures/templates/secure_baseline.yaml \
   --after tests/fixtures/templates/dangerous_changes.yaml \
   --environment production
 ```
 
-### Step 3: Verify the rules engine
+AI adds: explanation with FACT/INFERENCE labels, blast radius assessment, operational impact, and specific remediation steps.
+
+### Step 4: Validate the rules engine
 
 ```bash
-# Run the evaluation suite (7 scenarios, deterministic)
+# Run all 7 evaluation scenarios
 python cli.py eval
+# Expected: 7/7 PASS, 100% accuracy
 
-# Expected output: 7/7 PASS, 100% accuracy across all metrics
+# Run unit tests
+pytest tests/ -v
+# Expected: 150+ tests passing
 ```
 
-### Step 4: Run tests
+---
+
+## Docker
 
 ```bash
-pytest tests/ -v
-# Expected: 112 tests passing
+# Build
+docker build -t risk-analyzer .
+
+# Analyze a template
+docker run -v $(pwd)/templates:/templates risk-analyzer \
+  cli.py analyze --after /templates/my-stack.yaml --no-ai
+
+# With AI (pass AWS credentials)
+docker run \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION \
+  -v $(pwd)/templates:/templates \
+  risk-analyzer cli.py analyze --after /templates/my-stack.yaml
+
+# Web dashboard
+docker run -p 8501:8501 \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION \
+  risk-analyzer web_server.py
 ```
 
 ---
 
 ## Output Formats
 
-| Format | Flag | Use Case |
-|:-------|:-----|:---------|
-| Rich terminal | `--format rich` (default) | Interactive review |
-| JSON | `--format json` | Programmatic consumption, API integration |
-| SARIF v2.1.0 | `--format sarif` | GitHub Security tab, VS Code SARIF Viewer |
-| Markdown | `--format markdown` | PR comments, documentation |
-| JUnit XML | `--format junit` | CI test reporting (Jenkins, GitHub Actions) |
-
+### Rich Terminal (default)
 ```bash
-# SARIF for GitHub Security tab
-python cli.py analyze --after template.yaml --format sarif --output-file results.sarif
+python cli.py analyze --after template.yaml --no-ai
+```
+Color-coded severity, resource tables, findings with compliance tags, AI sections.
 
-# Markdown for PR comment
-python cli.py analyze --after template.yaml --format markdown --output-file report.md
-
-# JUnit XML for CI
-python cli.py analyze --after template.yaml --format junit --output-file results.xml
-
-# JSON piped to jq
+### JSON
+```bash
 python cli.py analyze --after template.yaml --format json | jq '.decision'
+```
+
+### SARIF v2.1.0 (GitHub Security Tab)
+```bash
+python cli.py analyze --after template.yaml --format sarif --output-file results.sarif
+```
+Upload to GitHub Security tab — findings appear inline on the PR diff.
+
+### Markdown (PR Comments)
+```bash
+python cli.py analyze --after template.yaml --format markdown --output-file report.md
+```
+
+### JUnit XML (CI Test Reporting)
+```bash
+python cli.py analyze --after template.yaml --format junit --output-file results.xml
 ```
 
 ---
 
-## Rules Reference (27 Rules, 7 Categories)
+## Complete Rules Reference (27 Rules)
 
-Every rule maps to compliance frameworks: **CIS AWS Foundations Benchmark**, **AWS Security Hub**, **AWS Config Rules**, and **AWS Well-Architected Framework**.
+Every rule maps to: **CIS AWS Foundations Benchmark**, **AWS Security Hub**, **AWS Config Rules**, and **AWS Well-Architected Framework**.
 
-### IAM (5 rules)
+### IAM — Identity & Access Management (5 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| IAM-001 | Wildcard actions (`Action: "*"`) in IAM policies | CRITICAL | CIS 1.16, SecurityHub IAM.1 |
-| IAM-002 | Wildcard resources (`Resource: "*"`) | HIGH | CIS 1.16, SecurityHub IAM.1, WA SEC03-BP07 |
-| IAM-003 | Full admin: `Action: "*"` + `Resource: "*"` combined | CRITICAL | CIS 1.16, SecurityHub IAM.1, AWS Config iam-policy-no-statements-with-admin-access |
-| IAM-004 | Privilege escalation: `iam:PassRole`, `sts:AssumeRole *` | HIGH | CIS 1.16, WA SEC03-BP06 |
-| IAM-005 | Broad data access: `s3:*`, `dynamodb:*`, etc. | MEDIUM | CIS 1.16, WA SEC03-BP07 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| IAM-001 | Wildcard actions (`Action: "*"`) | CRITICAL | 1.16 | IAM.1 | — |
+| IAM-002 | Wildcard resources (`Resource: "*"`) | HIGH | 1.16 | IAM.1 | SEC03-BP07 |
+| IAM-003 | Full admin (`Action: "*"` + `Resource: "*"`) | CRITICAL | 1.16 | IAM.1 | SEC03-BP07 |
+| IAM-004 | Privilege escalation (`iam:PassRole`, `sts:AssumeRole *`) | HIGH | 1.16 | IAM.1 | SEC03-BP06 |
+| IAM-005 | Broad data access (`s3:*`, `dynamodb:*`) | MEDIUM | 1.16 | — | SEC03-BP07 |
 
-### Security Groups (4 rules)
+### Security Groups — Network Access Control (4 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| SG-001 | 0.0.0.0/0 to sensitive ports (SSH 22, RDP 3389, DBs) | CRITICAL | CIS 5.2/5.3, SecurityHub EC2.19 |
-| SG-002 | Unrestricted ingress 0.0.0.0/0 on any port | MEDIUM | CIS 5.2, SecurityHub EC2.18 |
-| SG-003 | Port ranges wider than 100 ports | MEDIUM | WA SEC05-BP02 |
-| SG-004 | All traffic (protocol `-1`) from any source | CRITICAL | CIS 5.2/5.3, SecurityHub EC2.19 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| SG-001 | 0.0.0.0/0 to sensitive ports (22, 3389, 3306, 5432, etc.) | CRITICAL | 5.2, 5.3 | EC2.19 | SEC05-BP02 |
+| SG-002 | Unrestricted ingress 0.0.0.0/0 on any port | MEDIUM | 5.2 | EC2.18 | — |
+| SG-003 | Port ranges wider than 100 ports | MEDIUM | — | — | SEC05-BP02 |
+| SG-004 | All traffic (protocol `-1`) from any source | CRITICAL | 5.2, 5.3 | EC2.19 | SEC05-BP02 |
 
-### Network (4 rules)
+### Network — VPC & Routing (4 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| NET-001 | Subnet associated with IGW route table | HIGH | CIS 5.1, WA SEC05-BP01 |
-| NET-002 | NAT Gateway deletion (breaks private subnet internet) | HIGH | WA REL02-BP01 |
-| NET-003 | NACL allowing all inbound from 0.0.0.0/0 | MEDIUM | CIS 5.1, SecurityHub EC2.21 |
-| NET-004 | Default route (0.0.0.0/0) to Internet Gateway | HIGH | CIS 5.1, WA SEC05-BP01 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| NET-001 | Subnet associated with IGW route table | HIGH | 5.1 | — | SEC05-BP01 |
+| NET-002 | NAT Gateway deletion | HIGH | — | — | REL02-BP01 |
+| NET-003 | NACL allowing all inbound from 0.0.0.0/0 | MEDIUM | 5.1 | EC2.21 | SEC05-BP02 |
+| NET-004 | Default route to Internet Gateway | HIGH | 5.1 | — | SEC05-BP01 |
 
-### Availability (5 rules)
+### Availability — Resilience & Recovery (5 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| AVAIL-001 | ASG desired capacity reduction | MEDIUM | WA REL06-BP01 |
-| AVAIL-002 | ASG min capacity below 2 (single point of failure) | HIGH | WA REL10-BP01 |
-| AVAIL-003 | Multi-AZ disabled on RDS | CRITICAL | SecurityHub RDS.5, WA REL10-BP01 |
-| AVAIL-004 | Deletion of critical resources (RDS, DynamoDB, ECS, EKS) | CRITICAL | WA OPS08-BP01 |
-| AVAIL-005 | Backup retention reduced to 0 days | HIGH | SecurityHub RDS.11, WA REL09-BP01 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| AVAIL-001 | ASG desired capacity reduction | MEDIUM | — | — | REL06-BP01 |
+| AVAIL-002 | ASG min capacity below 2 | HIGH | — | — | REL10-BP01 |
+| AVAIL-003 | Multi-AZ disabled on RDS | CRITICAL | — | RDS.5 | REL10-BP01 |
+| AVAIL-004 | Deletion of critical resources (RDS, DynamoDB, ECS, EKS) | CRITICAL | — | — | OPS08-BP01 |
+| AVAIL-005 | Backup retention reduced to 0 days | HIGH | — | RDS.11 | REL09-BP01 |
 
-### Encryption (3 rules)
+### Encryption — Data at Rest (3 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| ENC-001 | S3 bucket without server-side encryption | HIGH | CIS 2.1.1, SecurityHub S3.4, WA SEC08-BP02 |
-| ENC-002 | RDS instance without storage encryption | CRITICAL | CIS 2.3.1, SecurityHub RDS.3, WA SEC08-BP02 |
-| ENC-003 | EBS volume without encryption | HIGH | CIS 2.2.1, SecurityHub EC2.3, WA SEC08-BP02 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| ENC-001 | S3 bucket without server-side encryption | HIGH | 2.1.1 | S3.4 | SEC08-BP02 |
+| ENC-002 | RDS instance without storage encryption | CRITICAL | 2.3.1 | RDS.3 | SEC08-BP02 |
+| ENC-003 | EBS volume without encryption | HIGH | 2.2.1 | EC2.3 | SEC08-BP02 |
 
 ### Logging & Monitoring (3 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| LOG-001 | S3 bucket without access logging | MEDIUM | CIS 3.6, SecurityHub S3.9, WA SEC04-BP02 |
-| LOG-002 | CloudTrail trail deletion | CRITICAL | CIS 3.1, SecurityHub CloudTrail.1, WA SEC04-BP01 |
-| LOG-003 | CloudTrail logging disabled (`IsLogging: false`) | CRITICAL | CIS 3.1, SecurityHub CloudTrail.1, WA SEC04-BP01 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| LOG-001 | S3 bucket without access logging | MEDIUM | 3.6 | S3.9 | SEC04-BP02 |
+| LOG-002 | CloudTrail trail deletion | CRITICAL | 3.1 | CloudTrail.1 | SEC04-BP01 |
+| LOG-003 | CloudTrail logging disabled | CRITICAL | 3.1 | CloudTrail.1 | SEC04-BP01 |
 
-### Data Protection (3 rules)
+### Data Protection — Public Exposure & Deletion Safety (3 rules)
 
-| Rule | What It Detects | Severity | Key Compliance |
-|:-----|:---------------|:---------|:---------------|
-| S3-001 | S3 bucket without public access block | CRITICAL | CIS 2.1.5, SecurityHub S3.1/S3.2/S3.3, WA SEC08-BP04 |
-| RDS-001 | RDS instance with `PubliclyAccessible: true` | CRITICAL | CIS 2.3.2, SecurityHub RDS.2, WA SEC05-BP01 |
-| DEL-001 | Critical resources without deletion protection | HIGH | SecurityHub RDS.8, WA REL09-BP01 |
+| Rule | What It Detects | Severity | CIS | SecurityHub | Well-Architected |
+|:-----|:---------------|:---------|:----|:------------|:-----------------|
+| S3-001 | S3 bucket without public access block | CRITICAL | 2.1.5 | S3.1, S3.2, S3.3 | SEC08-BP04 |
+| RDS-001 | RDS instance with `PubliclyAccessible: true` | CRITICAL | 2.3.2 | RDS.2 | SEC05-BP01 |
+| DEL-001 | Critical resources without deletion protection | HIGH | — | RDS.8 | REL09-BP01 |
 
 ---
 
 ## Risk Scoring
 
-Scoring is fully deterministic — no AI involvement in the decision.
+```mermaid
+flowchart LR
+    subgraph Input
+        F["All Findings"]
+    end
+    subgraph Calculation
+        direction TB
+        H["Highest severity<br/>determines risk level"]
+        C["Count at that severity<br/>determines score"]
+        H --> C
+    end
+    subgraph Output
+        direction TB
+        S1["CRITICAL: 80 + 5n<br/>(max 100)"]
+        S2["HIGH: 60 + 5n<br/>(max 79)"]
+        S3["MEDIUM: 40 + 5n<br/>(max 59)"]
+        S4["LOW: 10 + 5n<br/>(max 39)"]
+    end
+    F --> Calculation --> Output
+```
 
-### How scores are calculated
+| Scenario | Findings | Score | Decision |
+|:---------|:---------|:------|:---------|
+| 3 CRITICAL + 2 HIGH | Score: 80 + 3×5 = **95** | CRITICAL | **BLOCK** |
+| 1 HIGH + 4 MEDIUM | Score: 60 + 1×5 = **65** | HIGH | **REVIEW** |
+| 2 MEDIUM | Score: 40 + 2×5 = **50** | MEDIUM | **REVIEW** |
+| 1 LOW | Score: 10 + 1×5 = **15** | LOW | **APPROVE** |
+| No findings | Score: **5** | LOW | **APPROVE** |
 
-1. Each finding has a severity: CRITICAL, HIGH, MEDIUM, or LOW
-2. The **highest severity** across all findings determines the risk level
-3. The count of findings at that severity determines the exact score:
-
-| Highest Severity | Base Score | Per-Finding Bonus | Score Range | Decision |
-|:----------------|:-----------|:-----------------|:------------|:---------|
-| CRITICAL | 80 | +5 per CRITICAL finding | 80–100 | **BLOCK** |
-| HIGH | 60 | +5 per HIGH finding | 60–79 | **REVIEW** |
-| MEDIUM | 40 | +5 per MEDIUM finding | 40–59 | **REVIEW** |
-| LOW | 10 | +5 per LOW finding | 10–39 | **APPROVE** |
-| No findings | 5 | — | 5 | **APPROVE** |
-
-### Exit codes
-
-| Decision | Exit Code | CI Behavior |
-|:---------|:----------|:------------|
-| APPROVE | 0 | Pipeline continues |
-| REVIEW | 1 | Pipeline fails (configurable) |
-| BLOCK | 1 | Pipeline fails |
+Thresholds are configurable per environment via `risk-analyzer.yaml`.
 
 ---
 
 ## AI Analysis: FACT vs INFERENCE
 
-When AI is enabled (default), the analyzer sends the evidence package to Amazon Bedrock for explanation. The AI output is strictly structured:
+When AI is enabled, the evidence package is sent to Amazon Bedrock. The system prompt enforces strict structure:
 
-- **FACTS** — directly observable from the evidence (e.g., "Port 5432 is open to CIDR 0.0.0.0/0")
-- **INFERENCES** — conclusions drawn from facts (e.g., "The PostgreSQL database could be reachable from the public internet")
+```mermaid
+flowchart LR
+    E[Evidence Package<br/>findings + resources + context] --> B[Amazon Bedrock<br/>Nova Lite v1]
+    B --> F[FACTS<br/>Directly observable<br/>e.g. Port 5432 open to 0.0.0.0/0]
+    B --> I[INFERENCES<br/>Conclusions from facts<br/>e.g. Database reachable from internet]
+    B --> R[Remediation<br/>Specific fixes per finding]
+    B --> BR[Blast Radius<br/>Affected systems and data]
+    B --> O[Operational Impact<br/>What breaks or degrades]
+```
 
-The AI also provides:
-- **Blast radius** — what systems and data are affected
-- **Operational impact** — what breaks or degrades
-- **Remediation steps** — specific fixes for each finding
+**Key guarantees:**
+- AI never invents findings — it only explains what rules detected
+- AI never changes the BLOCK/APPROVE decision — thresholds are deterministic
+- Every fact is traceable to evidence in the package
+- If AI fails (throttled, unavailable), you still get the full deterministic report
 
 ```
 Model:           amazon.nova-lite-v1:0 (configurable)
 Retry:           3 attempts with exponential backoff on throttling
 Token limit:     Evidence truncated to 15K chars if oversized
-Graceful fallback: If AI fails, deterministic report still completes
+Fallback:        Deterministic report completes without AI
 ```
 
 ---
 
 ## Configuration
 
-Create `risk-analyzer.yaml` in your project root to customize behavior per repository and environment.
+Create `risk-analyzer.yaml` in your project root:
 
 ```yaml
-# Scoring thresholds (adjust sensitivity)
+# Risk scoring thresholds
 thresholds:
-  critical_min: 80
-  high_min: 60
-  medium_min: 40
+  critical_min: 80   # Score >= 80 → CRITICAL → BLOCK
+  high_min: 60       # Score >= 60 → HIGH → REVIEW
+  medium_min: 40     # Score >= 40 → MEDIUM → REVIEW
 
 # AI configuration
 ai:
@@ -271,147 +398,215 @@ ai:
   model_id: amazon.nova-lite-v1:0
   max_tokens: 2048
 
-# Disable specific rules globally
+# Disable rules globally
 disabled_rules:
-  - SG-003    # Wide port ranges acceptable in this project
+  - SG-003            # Wide port ranges acceptable in this project
 
 # Per-environment overrides
 environments:
   production:
-    block_on_high: true       # BLOCK on HIGH findings (not just CRITICAL)
+    block_on_high: true         # BLOCK on HIGH (not just CRITICAL)
     thresholds:
-      critical_min: 70        # Stricter scoring in production
+      critical_min: 70          # Stricter scoring
       high_min: 50
-  development:
+  staging:
     disabled_rules:
-      - SG-002                # Allow unrestricted ingress in dev
-    severity_overrides:
-      IAM-002: MEDIUM         # Downgrade wildcard resources in dev
+      - SG-002                  # Allow unrestricted ingress in staging
+    rule_overrides:
+      IAM-002:
+        severity: MEDIUM        # Downgrade wildcard resources
+  development:
+    rule_overrides:
+      SG-002:
+        enabled: false          # Disable in dev
 
-# Suppressions (accepted risks with audit trail)
+# Suppressions — accepted risks with audit trail
 suppressions:
   - rule_id: SG-001
     resource_pattern: "DevSecurityGroup"
     reason: "Accepted risk — approved in SEC-1234"
-    expires: "2025-12-31T00:00:00Z"    # Auto-reinstates after expiry
+    expires: "2025-12-31T00:00:00Z"     # Auto-reinstates after expiry
 
   - rule_id: ENC-001
     resource_pattern: "PublicAssetsBucket"
     reason: "Public static assets — encryption not required"
 ```
 
-See [`risk-analyzer.yaml`](risk-analyzer.yaml) for the full annotated default configuration.
+### Config resolution order
+1. `--config path/to/config.yaml` (explicit)
+2. `risk-analyzer.yaml` in current directory (auto-detected)
+3. `.risk-analyzer.yaml` in current directory
+4. `RISK_ANALYZER_CONFIG` environment variable
+5. Built-in defaults (all rules enabled, standard thresholds)
+
+See [`risk-analyzer.yaml`](risk-analyzer.yaml) for the full annotated default.
 
 ---
 
 ## CI/CD Integration
 
-### GitHub Actions (recommended)
+### GitHub Actions (Recommended)
 
-Copy `.github/workflows/risk-analyze.yml` to your repository. On every PR that changes CloudFormation files:
+```mermaid
+flowchart LR
+    PR[PR with CFn changes] --> D[Detect changed files]
+    D --> A[Run risk analysis<br/>per file]
+    A --> SARIF[Upload SARIF<br/>to Security Tab]
+    A --> MD[Post Markdown<br/>PR comment]
+    A --> G{Decision?}
+    G -->|BLOCK| F[Fail check ❌]
+    G -->|APPROVE/REVIEW| P[Pass check ✅]
+```
 
-1. Detects changed `.yaml`/`.json` files matching CloudFormation patterns
-2. Runs deterministic risk analysis (fast, no AI dependency)
-3. Uploads SARIF to GitHub Security tab (findings appear inline on the PR)
-4. Posts a Markdown risk summary as a PR comment
-5. Fails the check if any file triggers BLOCK
+**Setup (3 steps):**
 
-**Setup:**
-1. Copy the workflow file to your repo's `.github/workflows/`
-2. Set `AWS_REGION` as a repository variable (optional — defaults to `us-west-2`)
-3. For AI analysis, add AWS credentials as repository secrets (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+1. Copy `.github/workflows/risk-analyze.yml` to your repo
+2. Copy this project's `cli.py`, `src/`, and `requirements.txt` to your repo (or install as a package)
+3. Optionally set `AWS_REGION` as a repository variable
 
-### Any CI System (Jenkins, GitLab, CircleCI, etc.)
+That's it. The workflow triggers automatically on PRs that change CloudFormation files in `infra/`, `cloudformation/`, `templates/`, or `cfn/` directories.
+
+**What happens on every PR:**
+- Detects which CloudFormation files changed
+- Runs deterministic analysis (fast, no AI needed)
+- Uploads SARIF to GitHub Security tab (findings appear inline on the diff)
+- Posts a Markdown summary as a PR comment
+- Fails the check if any file triggers BLOCK
+
+### GitLab CI
+
+```yaml
+risk-analysis:
+  image: python:3.12-slim
+  stage: test
+  script:
+    - pip install uv && uv venv .venv && source .venv/bin/activate
+    - uv pip install -r requirements.txt
+    - python cli.py analyze --after $CI_PROJECT_DIR/infra/stack.yaml --no-ai --format junit --output-file results.xml
+  artifacts:
+    reports:
+      junit: results.xml
+  rules:
+    - changes:
+        - infra/**/*.yaml
+        - infra/**/*.yml
+```
+
+### Jenkins
+
+```groovy
+pipeline {
+    agent { docker { image 'python:3.12-slim' } }
+    stages {
+        stage('Risk Analysis') {
+            steps {
+                sh '''
+                    pip install uv && uv venv .venv && . .venv/bin/activate
+                    uv pip install -r requirements.txt
+                    python cli.py analyze \
+                        --after infra/stack.yaml \
+                        --no-ai \
+                        --format junit \
+                        --output-file results.xml
+                '''
+                junit 'results.xml'
+            }
+        }
+    }
+}
+```
+
+### Any CI System
 
 ```bash
-# Basic gate — exits 1 on BLOCK/REVIEW, 0 on APPROVE
+# Exit code: 0 = APPROVE, 1 = BLOCK or REVIEW
 python cli.py analyze \
   --before baseline.yaml \
   --after proposed.yaml \
   --environment production \
   --no-ai
 
-# SARIF output for security scanning integration
-python cli.py analyze \
-  --after proposed.yaml \
-  --no-ai \
-  --format sarif \
-  --output-file results.sarif
-
-# JSON for custom processing
-python cli.py analyze \
-  --after proposed.yaml \
-  --no-ai \
-  --format json | jq '{decision, risk_score, risk_level}'
+# Machine-readable decision
+python cli.py analyze --after proposed.yaml --no-ai --format json \
+  | jq -r '.decision'
 ```
-
-### AWS CodeBuild
-
-See [`ci/buildspec.yaml`](ci/buildspec.yaml) for a ready-to-use buildspec and [`ci/codebuild-project.yaml`](ci/codebuild-project.yaml) for the CloudFormation project definition.
 
 ---
 
 ## AWS Integrations (All Optional)
 
-The core analyzer works entirely offline with `--no-ai`. AWS integrations add persistence, alerting, and observability.
+The core analyzer works entirely offline. AWS integrations add persistence, alerting, and observability.
+
+```mermaid
+flowchart TB
+    subgraph Core["Core (no AWS needed)"]
+        A[Analyzer] --> R[Rules Engine<br/>27 rules]
+        R --> S[Scoring]
+    end
+
+    subgraph Optional["Optional AWS Services"]
+        B[Amazon Bedrock<br/>AI Explanation]
+        D[DynamoDB<br/>Report Storage]
+        S3[S3<br/>Evidence Archival]
+        SNS[SNS<br/>Alerts]
+        CW[CloudWatch<br/>Metrics & Dashboard]
+    end
+
+    A -.->|--no-ai to skip| B
+    A -.->|--save| D
+    A -.->|--save-evidence| S3
+    A -.->|--notify| SNS
+    A -.->|automatic| CW
+
+    style Core fill:#28a745,color:#fff
+    style Optional fill:#17a2b8,color:#fff
+```
 
 ### DynamoDB — Report Storage
 
-Store every analysis for audit trail and historical trending.
-
 ```bash
+# Store for audit trail
 python cli.py analyze --after template.yaml --save
 
-# Retrieve by change ID
-python cli.py report CHG-A1B2C3D4
-
-# List recent reports filtered by risk level
-python cli.py list --risk-level CRITICAL --limit 10
-
-# View trends: risk distribution, block rate, environment breakdown
-python cli.py trending
+# Query reports
+python cli.py report CHG-A1B2C3D4       # By change ID
+python cli.py list --risk-level CRITICAL  # Filter by risk
+python cli.py trending                    # Risk trends over time
 ```
 
 ### S3 — Evidence Archival
-
-Archive the full evidence package (findings, resource changes, templates) for post-incident analysis.
 
 ```bash
 python cli.py analyze --before current.yaml --after proposed.yaml --save-evidence
 ```
 
-### SNS — Notifications
-
-Alert on-call teams when HIGH or CRITICAL changes are detected.
+### SNS — Team Alerts
 
 ```bash
 python cli.py analyze --after template.yaml --notify
-
-# Subscribe an email
 python cli.py subscribe oncall@company.com
 ```
 
 ### CloudWatch — Metrics & Dashboard
 
-Real-time operational visibility with 8 pre-built widgets.
-
 ```bash
 python cli.py dashboard
+# Creates 8-widget dashboard: AnalysisCount, RiskScore, FindingCount,
+# AnalysisDuration, Decision distribution, RiskLevel distribution,
+# RuleTriggerCount, FindingsBySeverity
 ```
-
-Published metrics: `AnalysisCount`, `RiskScore`, `FindingCount`, `AnalysisDuration`, `Decision_BLOCK/REVIEW/APPROVE`, `RiskLevel_CRITICAL/HIGH/MEDIUM/LOW`, `RuleTriggerCount`, `FindingsBySeverity`.
 
 ### Infrastructure Setup
 
 ```bash
-# Option 1: CloudFormation (if your account permits)
+# Option 1: CloudFormation (creates DynamoDB table, S3 bucket, SNS topic)
 aws cloudformation deploy \
   --template-file infra/risk-analyzer-infra.yaml \
   --stack-name risk-analyzer \
   --parameter-overrides Environment=prod \
   --capabilities CAPABILITY_NAMED_IAM
 
-# Option 2: AWS CLI (manual)
+# Option 2: Manual (AWS CLI)
 source setup-env.sh
 ```
 
@@ -424,10 +619,11 @@ python web_server.py
 # Opens at http://localhost:8501
 ```
 
-- Upload templates for on-demand analysis
+- Upload before/after templates for on-demand analysis
 - View historical reports with risk level distribution
 - Quick-test with built-in fixture templates
 - Full report view with AI analysis, facts, and inferences
+- REST API at `/api/reports`, `/api/analyze`, `/api/stats`
 
 ---
 
@@ -436,57 +632,56 @@ python web_server.py
 7 built-in scenarios validate rules fire correctly and risk levels match expectations.
 
 ```bash
-# Deterministic evaluation (no AWS credentials needed)
+# Deterministic (no AWS needed)
 python cli.py eval
 
 # With AI quality scoring (8 dimensions)
 python cli.py eval --ai
 
-# JSON for CI integration
+# Machine-readable
 python cli.py eval --json-output
 ```
 
-**Evaluation metrics:**
-- Risk level accuracy — expected vs actual (CRITICAL/HIGH/MEDIUM/LOW)
-- Decision accuracy — expected vs actual (BLOCK/REVIEW/APPROVE)
-- Rule detection accuracy — expected rule IDs fire
-- AI quality (8 checks): explanation presence, facts, inferences, grounding, hallucination detection, remediation, blast radius, structured output
+| ID | Scenario | Expected | Validates |
+|:---|:---------|:---------|:----------|
+| EVAL-001 | Public database exposure (SG opens PostgreSQL to 0.0.0.0/0) | CRITICAL/BLOCK | SG-001, SG-004, IAM-003, AVAIL-001/003/005 |
+| EVAL-002 | IAM admin permissions (Action: *, Resource: *) | CRITICAL/BLOCK | IAM-003 |
+| EVAL-003 | Reduced production redundancy (ASG, Multi-AZ, backups) | CRITICAL/BLOCK | AVAIL-001, AVAIL-003, AVAIL-005 |
+| EVAL-004 | Minor metadata/tag change | LOW/APPROVE | No rules fire |
+| EVAL-005 | New stack with public ALB and broad S3 access | HIGH/REVIEW | IAM-002, SG-002 |
+| EVAL-006 | Identical before/after (no changes) | LOW/APPROVE | No rules fire |
+| EVAL-007 | Encryption, logging, data protection violations | CRITICAL/BLOCK | ENC-001/002/003, LOG-001/003, S3-001, RDS-001, DEL-001 |
 
-**Scenarios:**
-| ID | Scenario | Expected |
-|:---|:---------|:---------|
-| EVAL-001 | Public database exposure (SG opens PostgreSQL to 0.0.0.0/0) | CRITICAL / BLOCK |
-| EVAL-002 | IAM admin permissions (Action: *, Resource: *) | CRITICAL / BLOCK |
-| EVAL-003 | Production redundancy reduction (ASG, Multi-AZ, backups) | CRITICAL / BLOCK |
-| EVAL-004 | Minor metadata/tag change (no security impact) | LOW / APPROVE |
-| EVAL-005 | New stack with public ALB and broad S3 access | HIGH / REVIEW |
-| EVAL-006 | No changes (identical before/after) | LOW / APPROVE |
-| EVAL-007 | Encryption, logging, and data protection violations | CRITICAL / BLOCK |
+**AI quality scoring** (when `--ai` is passed) checks 8 dimensions:
+1. Has explanation
+2. Has facts
+3. Has inferences
+4. Facts are grounded in evidence
+5. No hallucination detected
+6. Has remediation steps
+7. Has blast radius assessment
+8. Structured output is valid
 
 ---
 
 ## Writing Custom Rules
 
-Extend the analyzer with organization-specific checks.
-
-### Step 1: Create a rule
+### Step 1: Create the rule
 
 ```python
-# src/rules/my_rules.py
-from src.models.schemas import ChangeType, ResourceChange, RuleFinding, Severity
+# src/rules/custom.py
+from src.models.schemas import ResourceChange, RuleFinding, Severity
 from src.rules.base import Rule
 
-class NoPublicLoadBalancer(Rule):
+class NoPublicALB(Rule):
     rule_id = "ORG-001"
-    name = "No public ALBs in private subnets"
-    description = "Detects ALBs with Scheme: internet-facing in private VPCs"
+    name = "No internet-facing ALBs"
+    description = "Detects ALBs with Scheme: internet-facing"
     severity = Severity.HIGH
     compliance = ["Internal-Policy-NET-01", "Well-Architected: SEC05-BP01"]
 
     def applies_to(self, change: ResourceChange) -> bool:
-        return change.resource_type in (
-            "AWS::ElasticLoadBalancingV2::LoadBalancer",
-        )
+        return change.resource_type == "AWS::ElasticLoadBalancingV2::LoadBalancer"
 
     def evaluate(self, change: ResourceChange) -> list[RuleFinding]:
         props = change.after or {}
@@ -497,7 +692,7 @@ class NoPublicLoadBalancer(Rule):
                 resource=change.resource_id,
                 finding="ALB is internet-facing — verify this is intentional",
                 evidence={"scheme": props.get("Scheme")},
-                remediation="Set Scheme to 'internal' if this ALB serves only private traffic",
+                remediation="Set Scheme to 'internal' for private-only access",
                 compliance=self.compliance,
             )]
         return []
@@ -506,17 +701,23 @@ class NoPublicLoadBalancer(Rule):
 ### Step 2: Register it
 
 ```python
-# In src/analyzer/orchestrator.py, add to _build_rule_engine():
-from src.rules.my_rules import NoPublicLoadBalancer
-
-def _build_rule_engine() -> RuleEngine:
-    engine = RuleEngine()
-    # ... existing rules ...
-    engine.register(NoPublicLoadBalancer())
-    return engine
+# src/analyzer/orchestrator.py — add to _build_rule_engine()
+from src.rules.custom import NoPublicALB
+engine.register(NoPublicALB())
 ```
 
-### Step 3: Add an eval scenario
+### Step 3: Add a test fixture and eval scenario
+
+```yaml
+# tests/fixtures/templates/public_alb.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  PublicALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+```
 
 ```json
 {
@@ -531,18 +732,46 @@ def _build_rule_engine() -> RuleEngine:
 }
 ```
 
+### Step 4: Verify
+
+```bash
+python cli.py eval                    # Should pass
+pytest tests/ -v                       # Should pass
+python cli.py analyze --after tests/fixtures/templates/public_alb.yaml --no-ai  # Should show ORG-001
+```
+
 ---
 
 ## Compliance Framework Reference
 
-| Framework | Coverage | Rules |
-|:----------|:---------|:------|
-| **CIS AWS Foundations Benchmark** | 1.16 (IAM), 2.x (Encryption/Data), 3.x (Logging), 5.x (Networking) | IAM-001–005, SG-001–004, NET-001–004, ENC-001–003, LOG-001–003, S3-001, RDS-001 |
-| **AWS Security Hub** | IAM.1, EC2.3/18/19/21, RDS.2/3/5/8/11, S3.1–4/9, CloudTrail.1 | All 27 rules |
-| **AWS Config Rules** | iam-policy-no-statements-with-admin-access, restricted-ssh, restricted-common-ports, rds-multi-az-support, rds-storage-encrypted, s3-bucket-server-side-encryption-enabled, cloudtrail-enabled, etc. | All 27 rules |
-| **AWS Well-Architected** | SEC03, SEC04, SEC05, SEC08, REL02, REL06, REL09, REL10, OPS08 | All 27 rules |
+```mermaid
+flowchart TB
+    subgraph Rules["27 Deterministic Rules"]
+        direction LR
+        R[IAM · SG · Network · Availability · Encryption · Logging · Data]
+    end
 
-Compliance tags appear in SARIF output and Markdown reports — trace any finding directly to your organization's control framework.
+    subgraph Frameworks["Compliance Frameworks"]
+        CIS[CIS AWS Foundations<br/>Benchmark v1.5]
+        SH[AWS Security Hub<br/>FSBP Controls]
+        AC[AWS Config<br/>Managed Rules]
+        WA[AWS Well-Architected<br/>Framework]
+    end
+
+    Rules --> CIS
+    Rules --> SH
+    Rules --> AC
+    Rules --> WA
+```
+
+| Framework | Sections Covered | Example Controls |
+|:----------|:----------------|:-----------------|
+| **CIS AWS Foundations** | 1.16, 2.1.x, 2.2.x, 2.3.x, 3.x, 5.x | IAM policy restrictions, encryption at rest, logging, network ACLs |
+| **AWS Security Hub** | IAM.1, EC2.3/18/19/21, RDS.2/3/5/8/11, S3.1-4/9, CloudTrail.1 | Foundational Security Best Practices |
+| **AWS Config** | iam-policy-no-statements-with-admin-access, restricted-ssh, rds-multi-az-support, s3-bucket-server-side-encryption-enabled, cloudtrail-enabled, etc. | 15+ managed rules |
+| **Well-Architected** | SEC03/04/05/08, REL02/06/09/10, OPS08 | Security, Reliability, Operations pillars |
+
+Compliance tags appear in **SARIF output** (GitHub Security tab), **Markdown reports** (PR comments), and **rich terminal output**.
 
 ---
 
@@ -550,24 +779,23 @@ Compliance tags appear in SARIF output and Markdown reports — trace any findin
 
 ```
 production-change-risk-analyzer/
-├── cli.py                         # CLI: analyze, report, list, eval, trending, dashboard, subscribe
+├── cli.py                         # CLI: analyze, eval, report, list, trending, dashboard, subscribe
 ├── web_server.py                  # FastAPI web dashboard launcher
+├── Dockerfile                     # Container image (python:3.12-slim)
 ├── risk-analyzer.yaml             # Default configuration (annotated)
-├── requirements.txt
+├── requirements.txt               # Python dependencies
+├── pyproject.toml                 # Package metadata
+├── LICENSE                        # MIT License
 ├── src/
-│   ├── analyzer/
-│   │   └── orchestrator.py        # Pipeline: parse → rules → evidence → AI → decision
-│   ├── ai/
-│   │   └── bedrock_analyzer.py    # Bedrock integration (retry, token protection, FACT/INFERENCE)
-│   ├── config.py                  # YAML config loader (env overrides, suppressions)
-│   ├── models/
-│   │   └── schemas.py             # Data models (ResourceChange, RuleFinding, RiskReport, etc.)
+│   ├── analyzer/orchestrator.py   # Pipeline: parse → rules → config filter → AI → decision
+│   ├── ai/bedrock_analyzer.py     # Bedrock (retry, token protection, FACT/INFERENCE prompt)
+│   ├── config.py                  # YAML config: thresholds, overrides, suppressions, environments
+│   ├── models/schemas.py          # Data models (ResourceChange, RuleFinding, RiskReport)
 │   ├── output/
 │   │   ├── sarif.py               # SARIF v2.1.0 (GitHub Security tab)
 │   │   ├── markdown.py            # Markdown (PR comments)
 │   │   └── junit.py               # JUnit XML (CI reporting)
-│   ├── parser/
-│   │   └── cloudformation.py      # CFn YAML/JSON parser with intrinsic function support
+│   ├── parser/cloudformation.py   # CFn parser with intrinsic function support
 │   ├── rules/
 │   │   ├── base.py                # Rule ABC and RuleEngine
 │   │   ├── iam.py                 # IAM-001 – IAM-005
@@ -577,31 +805,31 @@ production-change-risk-analyzer/
 │   │   ├── encryption.py          # ENC-001 – ENC-003
 │   │   ├── logging.py             # LOG-001 – LOG-003
 │   │   └── data.py                # S3-001, RDS-001, DEL-001
-│   ├── evaluation/
-│   │   └── runner.py              # 7 scenarios, 8 AI quality dimensions
-│   ├── notifications/
-│   │   └── sns.py                 # SNS alerts for HIGH/CRITICAL
+│   ├── evaluation/runner.py       # 7 scenarios, 8 AI quality dimensions
+│   ├── notifications/sns.py       # SNS alerts
 │   ├── observability/
-│   │   ├── metrics.py             # CloudWatch custom metrics (8 metric types)
+│   │   ├── metrics.py             # CloudWatch metrics (8 types)
 │   │   └── dashboard.py           # CloudWatch dashboard (8 widgets)
 │   ├── storage/
-│   │   ├── dynamodb.py            # Report storage (PK=change_id, GSI on risk_level)
-│   │   └── s3.py                  # Evidence archival with versioning
+│   │   ├── dynamodb.py            # Report storage
+│   │   └── s3.py                  # Evidence archival
 │   └── web/
 │       ├── app.py                 # FastAPI application
 │       └── templates/             # Jinja2 (dashboard, analyze, report)
-├── tests/                         # 112 tests
+├── tests/                         # 150+ tests
 │   ├── test_rules/                # Unit tests for all 27 rules
-│   ├── test_analyzer/             # Integration tests for orchestrator
-│   └── test_output/               # SARIF, Markdown output tests
-├── eval/
-│   └── scenarios.json             # 7 evaluation scenarios
+│   ├── test_analyzer/             # Orchestrator integration tests
+│   ├── test_output/               # SARIF, Markdown output tests
+│   ├── test_config.py             # Config loading, overrides, suppressions
+│   ├── test_web/                  # FastAPI endpoint tests
+│   ├── test_storage/              # DynamoDB, S3 tests (moto)
+│   └── test_notifications/        # SNS notification tests (moto)
+├── eval/scenarios.json            # 7 evaluation scenarios
 ├── ci/
-│   ├── buildspec.yaml             # AWS CodeBuild buildspec
-│   ├── codebuild-project.yaml     # CodeBuild project template
+│   ├── buildspec.yaml             # AWS CodeBuild
 │   └── run-local.sh               # Local CI runner
 ├── infra/
-│   └── risk-analyzer-infra.yaml   # CloudFormation: DynamoDB, S3, SNS, CloudWatch
+│   └── risk-analyzer-infra.yaml   # CloudFormation: DynamoDB, S3, SNS
 └── .github/workflows/
     ├── risk-analyze.yml           # PR risk analysis (SARIF + comment + gate)
     └── ci.yml                     # Tests + evaluation
@@ -609,48 +837,38 @@ production-change-risk-analyzer/
 
 ---
 
-## Running Without AWS (Local Development)
+## Running Without AWS
 
 The analyzer works fully offline for deterministic analysis:
 
 ```bash
-# No AWS credentials needed — rules-only mode
-python cli.py analyze --after your-template.yaml --no-ai
-
-# Run tests (mocked AWS, no credentials needed)
+# No credentials needed
+python cli.py analyze --after template.yaml --no-ai
 pytest tests/ -v
-
-# Run evaluation (deterministic, no AWS)
 python cli.py eval
 ```
 
-Only these features require AWS credentials:
-- AI analysis (Bedrock) — disable with `--no-ai`
-- Report storage (`--save`) — requires DynamoDB
-- Evidence archival (`--save-evidence`) — requires S3
-- Notifications (`--notify`) — requires SNS
-- Metrics/dashboard — requires CloudWatch
+| Feature | AWS Required? | How to Skip |
+|:--------|:-------------|:------------|
+| 27 deterministic rules | No | Always available |
+| Risk scoring + decision | No | Always available |
+| SARIF/Markdown/JSON/JUnit output | No | Always available |
+| Configuration system | No | Always available |
+| Evaluation framework | No | Always available |
+| AI explanation | Yes (Bedrock) | `--no-ai` flag |
+| Report storage | Yes (DynamoDB) | Don't pass `--save` |
+| Evidence archival | Yes (S3) | Don't pass `--save-evidence` |
+| Notifications | Yes (SNS) | Don't pass `--notify` |
+| Metrics dashboard | Yes (CloudWatch) | Don't run `dashboard` command |
 
 ---
 
-## Tests
+## Contributing
 
-```bash
-# All tests (112 tests, ~0.5s)
-pytest tests/ -v
-
-# By category
-pytest tests/test_rules/ -v        # Rule unit tests
-pytest tests/test_analyzer/ -v     # Orchestrator integration
-pytest tests/test_output/ -v       # Output format tests
-
-# Evaluation (7 scenarios)
-python cli.py eval
-python cli.py eval --json-output   # Machine-readable
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding rules, writing tests, and submitting PRs.
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE) — use freely in personal, open source, and commercial projects.

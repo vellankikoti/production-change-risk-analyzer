@@ -76,28 +76,25 @@ jobs:
               BEFORE_ARG="--before /tmp/before.yaml"
             fi
 
-            python cli.py analyze \
-              $BEFORE_ARG \
-              --after "$file" \
-              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
-              --no-ai \
-              --format sarif \
-              --output-file "reports/${file//\//_}.sarif" || true
+            ENV="${{ github.base_ref == 'main' && 'production' || 'staging' }}"
+            SAFE_NAME="${file//\//_}"
 
-            python cli.py analyze \
-              $BEFORE_ARG \
-              --after "$file" \
-              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
-              --no-ai \
-              --format markdown \
-              --output-file "reports/${file//\//_}.md" || true
+            # JSON for decision extraction
+            python cli.py analyze $BEFORE_ARG \
+              --after "$file" --environment "$ENV" --no-ai \
+              --format json --output-file "reports/${SAFE_NAME}.json" || true
 
-            FILE_DECISION=$(python cli.py analyze \
-              $BEFORE_ARG \
-              --after "$file" \
-              --environment "${{ github.base_ref == 'main' && 'production' || 'staging' }}" \
-              --no-ai \
-              --format json 2>/dev/null | python -c "import sys,json; print(json.load(sys.stdin)['decision'])" 2>/dev/null || echo "ERROR")
+            # SARIF for GitHub Security tab
+            python cli.py analyze $BEFORE_ARG \
+              --after "$file" --environment "$ENV" --no-ai \
+              --format sarif --output-file "reports/${SAFE_NAME}.sarif" || true
+
+            # Markdown for PR comment
+            python cli.py analyze $BEFORE_ARG \
+              --after "$file" --environment "$ENV" --no-ai \
+              --format markdown --output-file "reports/${SAFE_NAME}.md" || true
+
+            FILE_DECISION=$(python -c "import json; print(json.load(open('reports/${SAFE_NAME}.json'))['decision'])" 2>/dev/null || echo "ERROR")
 
             if [ "$FILE_DECISION" = "BLOCK" ]; then
               DECISION="BLOCK"
